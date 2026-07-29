@@ -1,0 +1,26 @@
+{
+  "name": "Xenon Oscillation",
+  "seed": 123,
+  "initial_state": {
+    "r": {
+      "power": 2560,
+      "state": "POWER",
+      "rods": 0,
+      "void": 0.1,
+      "xenon": 0.05,
+      "iodine": 0.15,
+      "fuelT": 600,
+      "graphiteT": 400,
+      "precursors": [4.0,4.0,4.0,4.0,4.0,4.0],
+      "refuelBonus": 0
+    }
+  },
+  "actions": [
+    { "time": 0.0, "op": "set_power", "args": [1600] },
+    { "time": 0.0, "op": "set_void", "args": [0.05] }
+  ],
+  "expectations": [
+    { "time": 100, "field": "r.xenon", "value": 0, "tolerance": 1e40 },
+    { "time": 100, "field": "r.iodine", "value": 0, "tolerance": 1e40 }
+  ]
+}

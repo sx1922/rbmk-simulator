@@ -1,0 +1,26 @@
+{
+  "name": "Normal Startup",
+  "seed": 42,
+  "initial_state": {
+    "r": {
+      "power": 0,
+      "state": "SHUTDOWN",
+      "rods": 100,
+      "void": 0,
+      "xenon": 0,
+      "iodine": 0,
+      "fuelT": 300,
+      "graphiteT": 300,
+      "precursors": [0,0,0,0,0,0],
+      "refuelBonus": 0
+    }
+  },
+  "actions": [
+    { "time": 0.0, "op": "startup", "args": [100] },
+    { "time": 0.5, "op": "raise_rods", "args": [100] }
+  ],
+  "expectations": [
+    { "time": 100, "field": "r.state", "value": "POWER", "tolerance": 0 },
+    { "time": 100, "field": "r.power", "value": 0, "tolerance": 1e30 }
+  ]
+}

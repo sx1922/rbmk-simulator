@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=800">
+<title>RBMK-1000 模拟器</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="container">
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+</div>
+
+<!-- 加载顺序：config → state → utils → physics → systems → ui → audio → main -->
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/utils/math.js"></script>
+<script src="js/utils/format.js"></script>
+<script src="js/utils/save.js"></script>
+<script src="js/physics/neutron.js"></script>
+<script src="js/physics/reactivity.js"></script>
+<script src="js/physics/thermal.js"></script>
+<script src="js/physics/xenon.js"></script>
+<script src="js/physics/turbine.js"></script>
+<script src="js/physics/az5.js"></script>
+<script src="js/physics/protection.js"></script>
+<script src="js/systems/economy.js"></script>
+<script src="js/systems/politics.js"></script>
+<script src="js/systems/personnel.js"></script>
+<script src="js/systems/maintenance.js"></script>
+<script src="js/systems/events.js"></script>
+<script src="js/systems/mission.js"></script>
+<script src="js/ui/instruments.js"></script>
+<script src="js/ui/charts.js"></script>
+<script src="js/ui/dialogs.js"></script>
+<script src="js/ui/panels.js"></script>
+<script src="js/ui/render.js"></script>
+<script src="js/audio/audio.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Courier New', monospace;
+}
+#container {
+  background: #1a1a1d;
+  padding: 4px;
+  border-radius: 4px;
+}
+canvas {
+  display: block;
+  image-rendering: pixelated;
+  width: 800px;
+  height: 600px;
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Meltdown",
+  "seed": 99,
+  "initial_state": {
+    "r": {
+      "power": 2880,
+      "state": "POWER",
+      "rods": 10,
+      "void": 0.15,
+      "xenon": 0.05,
+      "iodine": 0.10,
+      "fuelT": 700,
+      "graphiteT": 500,
+      "precursors": [3.0,3.0,3.0,3.0,3.0,3.0],
+      "refuelBonus": 0
+    }
+  },
+  "actions": [
+    { "time": 0.0, "op": "raise_rods", "args": [10] },
+    { "time": 2.0, "op": "reduce_pumps", "args": [4] }
+  ],
+  "expectations": [
+    { "time": 100, "field": "r.power", "value": 1000, "tolerance": 1e30 },
+    { "time": 100, "field": "r.fuelT", "value": 1000, "tolerance": 5000 }
+  ]
+}
