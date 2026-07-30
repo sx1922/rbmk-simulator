@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>РБМК-1000 · БЛОК №4 — 控制室仿真器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=PT+Mono&family=Marck+Script&family=Oswald:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="room">
+
+  <div class="fluorescent" style="left:12%"></div>
+  <div class="fluorescent" style="left:48%"></div>
+  <div class="fluorescent" style="left:84%"></div>
+
+  <header id="plant-sign">
+    <span class="sign-ru">ЧЕРНОБЫЛЬСКАЯ АЭС ИМ. В.И. ЛЕНИНА</span>
+    <span class="sign-cn">切尔诺贝利核电站 · 4号机组 · РБМК-1000</span>
+  </header>
+
+  <div id="wall-clock">
+    <canvas id="clock-canvas" width="120" height="120"></canvas>
+    <div id="date-plate">26.04.1986</div>
+  </div>
+
+  <main id="panel-wall">
+
+    <section class="panel" id="panel-power">
+      <div class="panel-title">
+        <span class="ru">МОЩНОСТЬ И ПЕРИОД</span><span class="cn">功率与周期</span>
+      </div>
+      <div class="dial-row">
+        <div class="gauge-unit">
+          <canvas class="dial" id="dial-power" width="220" height="220"></canvas>
+          <div class="gauge-label"><span class="ru">N, МВт(т)</span><span class="cn">热功率</span></div>
+          <div class="gauge-readout" id="read-power">2000</div>
+        </div>
+        <div class="gauge-unit">
+          <canvas class="dial" id="dial-period" width="220" height="220"></canvas>
+          <div class="gauge-label"><span class="ru">ПЕРИОД, с</span><span class="cn">周期</span></div>
+          <div class="gauge-readout" id="read-period">∞</div>
+        </div>
+      </div>
+      <div class="lamp-bank" id="lamp-bank">
+        <div class="lamp-unit" data-lamp="P1"><div class="lamp"></div><span>П1</span><i>功率</i></div>
+        <div class="lamp-unit" data-lamp="P2"><div class="lamp"></div><span>П2</span><i>周期</i></div>
+        <div class="lamp-unit" data-lamp="P3"><div class="lamp"></div><span>П3</span><i>压力</i></div>
+        <div class="lamp-unit" data-lamp="P4"><div class="lamp"></div><span>П4</span><i>水位</i></div>
+        <div class="lamp-unit" data-lamp="P5"><div class="lamp"></div><span>П5</span><i>破损</i></div>
+        <div class="lamp-unit az-lamp" data-lamp="AZ"><div class="lamp"></div><span>АЗ</span><i>动作</i></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-core">
+      <div class="panel-title">
+        <span class="ru">РАЗРЕЗ АКТИВНОЙ ЗОНЫ</span><span class="cn">堆芯轴向剖面</span>
+      </div>
+      <canvas id="core-canvas" width="340" height="420"></canvas>
+      <div class="core-readouts">
+        <div><span class="ru">ОЗР</span><span class="cn">操作裕度</span><b id="read-opr">30</b><i>ст.</i></div>
+        <div><span class="ru">Xe-135</span><span class="cn">氙浓度</span><b id="read-xe">0.4</b><i>отн.</i></div>
+        <div><span class="ru">α</span><span class="cn">空泡</span><b id="read-alpha">20</b><i>%</i></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-rods">
+      <div class="panel-title">
+        <span class="ru">ПОЛОЖЕНИЕ СТЕРЖНЕЙ</span><span class="cn">控制棒棒位</span>
+      </div>
+      <canvas id="rods-canvas" width="300" height="380"></canvas>
+      <div class="rod-readouts">
+        <div><span class="ru">СРЕДНЕЕ</span><span class="cn">平均棒位</span><b id="read-rod-avg">55</b><i>%</i></div>
+        <div><span class="ru">ВВЕРХ</span><span class="cn">提升中</span><b id="read-rod-up">0</b><i></i></div>
+        <div><span class="ru">ВНИЗ</span><span class="cn">下插中</span><b id="read-rod-down">0</b><i></i></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-reactivity">
+      <div class="panel-title">
+        <span class="ru">БАЛАНС РЕАКТИВНОСТИ</span><span class="cn">反应性平衡</span>
+      </div>
+      <canvas id="rho-canvas" width="300" height="180"></canvas>
+      <div class="panel-title sub">
+        <span class="ru">РЕГИСТРАТОР</span><span class="cn">纸带记录仪</span>
+      </div>
+      <canvas id="chart-canvas" width="300" height="190"></canvas>
+      <div class="chart-legend">
+        <i style="--ink:#b02010">N(t)</i>
+        <i style="--ink:#1a4a9a">T</i>
+        <i style="--ink:#6a2a8a">Xe</i>
+        <i style="--ink:#1a1a1a">ρ</i>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-az">
+      <div class="panel-title">
+        <span class="ru">АВАРИЙНАЯ ЗАЩИТА</span><span class="cn">紧急保护</span>
+      </div>
+      <div class="az-assembly">
+        <div class="az-cover" id="az-cover">
+          <div class="az-cover-glass"></div>
+          <button class="az-button" id="btn-az5" title="АЗ-5 紧急停堆">
+            <span class="az-face">АЗ-5</span>
+          </button>
+        </div>
+        <div class="az-warning-stripes"></div>
+        <div class="az-caption"><span class="ru">КНОПКА АЗ-5</span><span class="cn">全部控制棒下插</span></div>
+      </div>
+      <div class="key-switch-unit">
+        <div class="key-switch" id="key-switch">
+          <div class="key-slot"></div>
+          <div class="key-handle" id="key-handle"></div>
+        </div>
+        <div class="az-caption"><span class="ru">БЛОКИРОВКА АЗ</span><span class="cn">保护闭锁钥匙</span></div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="console-desk">
+
+    <div class="console-unit">
+      <label><span class="ru">ЗАДАННАЯ МОЩНОСТЬ</span><span class="cn">目标功率 %</span></label>
+      <div class="slider-assembly">
+        <input type="range" id="slider-target" min="0" max="120" value="62" step="1">
+        <div class="slider-scale"><i>0</i><i>30</i><i>60</i><i>90</i><i>120</i></div>
+      </div>
+      <div class="setpoint-readout" id="read-target">62 %</div>
+    </div>
+
+    <div class="console-unit">
+      <label><span class="ru">СКОРОСТЬ ПОДЪЁМА</span><span class="cn">提棒速率</span></label>
+      <div class="rocker" id="rocker-speed">
+        <button data-val="0.1">МЕДЛ.</button>
+        <button data-val="0.4" class="active">РАБОЧ.</button>
+        <button data-val="1.0">БЫСТР.</button>
+      </div>
+      <div class="setpoint-readout">0.4 %/с</div>
+    </div>
+
+    <div class="console-unit">
+      <label><span class="ru">РЕЖИМ</span><span class="cn">运行模式</span></label>
+      <div class="rocker" id="rocker-mode">
+        <button data-val="auto" class="active">АВТО</button>
+        <button data-val="manual">РУЧН.</button>
+      </div>
+      <div class="setpoint-readout" id="read-mode">自动</div>
+    </div>
+
+    <div class="console-unit">
+      <label><span class="ru">ГЦН</span><span class="cn">主循环泵</span></label>
+      <div class="pump-bank" id="pump-bank">
+      </div>
+      <div class="setpoint-readout"><span id="read-pumps">6</span>/8 · <span id="read-flow">100</span>%</div>
+    </div>
+
+    <div class="console-unit">
+      <label><span class="ru">ВРЕМЯ</span><span class="cn">仿真时间</span></label>
+      <div class="rocker" id="rocker-timescale">
+        <button data-val="1">×1</button>
+        <button data-val="10" class="active">×10</button>
+        <button data-val="60">×60</button>
+        <button data-val="300">×300</button>
+      </div>
+      <div class="setpoint-readout" id="read-simtime">01:23:40</div>
+    </div>
+
+  </div>
+
+  <div id="machine-log">
+    <div class="log-header"><span class="ru">ПЕЧАТЬ СОБЫТИЙ</span><span class="cn">事件记录</span></div>
+    <div id="log-strip"></div>
+  </div>
+
+  <div id="desk-props">
+    <button class="prop" data-prop="manual">
+      <span class="prop-icon">📕</span><span class="prop-name">运行规程<br><i>РЕГЛАМЕНТ</i></span>
+    </button>
+    <button class="prop" data-prop="clipboard">
+      <span class="prop-icon">📋</span><span class="prop-name">值班日志<br><i>ЖУРНАЛ</i></span>
+    </button>
+    <button class="prop" data-prop="calculator">
+      <span class="prop-icon">🖩</span><span class="prop-name">计算器<br><i>МК-61</i></span>
+    </button>
+    <button class="prop" data-prop="dosimeter">
+      <span class="prop-icon">📟</span><span class="prop-name">剂量计<br><i>ДП-5</i></span>
+    </button>
+    <button class="prop" data-prop="phone">
+      <span class="prop-icon">☎</span><span class="prop-name">高频电话<br><i>ВЧ</i></span>
+    </button>
+    <button class="prop" data-prop="coffee">
+      <span class="prop-icon">🥃</span><span class="prop-name">茶炊<br><i>ЧАЙ</i></span>
+    </button>
+  </div>
+
+</div>
+
+<div id="prop-overlay" class="hidden">
+  <div id="prop-stage"></div>
+</div>
+
+<div id="manual-overlay" class="hidden">
+  <div id="manual-book">
+    <div class="manual-spine" id="manual-spine"></div>
+    <div class="manual-pages">
+      <div class="manual-page" id="manual-page"></div>
+    </div>
+    <div class="manual-controls">
+      <div class="manual-lang">
+        <button data-lang="zh" class="active">中文</button>
+        <button data-lang="ru">Рус</button>
+        <button data-lang="both">双语</button>
+      </div>
+      <div class="manual-pager">
+        <button id="manual-prev">◀</button>
+        <span id="manual-pageno">1 / 16</span>
+        <button id="manual-next">▶</button>
+      </div>
+      <button id="manual-close">✕ 合上</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/engine.js"></script>
+<script src="js/render.js"></script>
+<script src="js/props.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
