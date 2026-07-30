@@ -14,10 +14,12 @@ CONFIG.FLOW_PER_PUMP = 6000;  // m³/h 单台主泵流量
 CONFIG.PUMP_TOTAL = 8;        // 主泵总数
 
 // === 中子动力学（点堆） ===
-CONFIG.LAMBDA = 1e-4;         // s 中子代时间
-CONFIG.BETA_EFF = 0.0065;     // 有效缓发中子份额
-CONFIG.LAMBDA_D = [0.0124, 0.0305, 0.111, 0.301, 1.14, 3.01]; // 缓发中子衰变常数
-CONFIG.BETA_I = [0.00021, 0.00141, 0.00127, 0.00255, 0.00074, 0.00027]; // 各组份额
+CONFIG.LAMBDA_PROMPT = 1e-3;   // s 瞬发中子代时间 (RBMK 大型石墨堆特征值)
+CONFIG.BETA_EFF = 0.006502;    // 总缓发中子份额 (U-235 热裂变, Keepin 1965)
+CONFIG.BETA_I = [0.000215, 0.001424, 0.001274, 0.002568, 0.000748, 0.000273]; // 6 组份额
+CONFIG.LAMBDA_D = [0.0124, 0.0305, 0.111, 0.301, 1.14, 3.01]; // 6 组衰变常数 (s⁻¹)
+CONFIG.P_MAX_SAFE = 3840;      // MWt 最大安全热功率 (120%)
+CONFIG.P_MELTDOWN = 5000;      // MWt 绝对熔毁功率 (超过即不可逆)
 
 // === 反应性系数 ===
 CONFIG.ALPHA_FUEL = -2.4e-5;  // Δρ/°C 燃料多普勒系数

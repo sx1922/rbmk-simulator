@@ -23,7 +23,7 @@ Physics.AZ5.fire = function(state, rngFunc) {
   if (voidFrac > 0.3 && power > 1500) {
     var spikePower = power * (1 + voidFrac * 0.5);
 
-    if (spikePower > CONFIG.MELT_T) {
+    if (spikePower > CONFIG.P_MELTDOWN) {
       state.r.state = 'EXPLOSION';
       return 'SPIKE';
     }
