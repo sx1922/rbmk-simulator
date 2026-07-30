@@ -59,3 +59,4 @@ sed -i "s|</body>|<script>$JS_BUNDLE</script></body>|" "$DIST/index.html.tmp"
 
 mv "$DIST/index.html.tmp" "$DIST/index.html"
 echo "Build complete: $DIST/index.html"
+cp "$DIR/version.json" "$DIR/web/version.json"

@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "description": "RBMK-1000 nuclear reactor physics simulator — point kinetics, xenon transient, Chernobyl positive scram effect",
-  "main": "core/reactor.js",
+  "main": "lib/reactor.js",
   "scripts": {
-    "test": "node test/integration.test.js",
-    "demo": "node examples/demo.js",
-    "chernobyl": "node examples/chernobyl-scenario.js"
+    "test": "node tests/integration.test.js",
+    "demo": "node tests/scenarios/demo.js",
+    "chernobyl": "node tests/scenarios/chernobyl-scenario.js"
   },
   "keywords": [
     "nuclear", "reactor", "rbmk", "chernobyl",

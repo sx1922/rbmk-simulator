@@ -5,6 +5,7 @@
   let VERSION = null;
   let lastTime = 0;
   let animId = null;
+  let gameStarted = false;
 
   const LOG_MAX = 50;
 
@@ -84,9 +85,38 @@
     animId = requestAnimationFrame(loop);
   }
 
+  function startGame() {
+    if (gameStarted) return;
+    gameStarted = true;
+
+    RBMK.reset();
+    Audio.startHum();
+    Audio.setHumVolume(0.008);
+
+    initSlider();
+    initRockers();
+    initPumps();
+    initAZ5();
+    initAlarmLamps();
+    Props.init();
+
+    gt('room').style.display = 'flex';
+
+    logEvent('info', '\u0421\u041C\u0415\u041D\u0410 \u041D\u0410\u0427\u0410\u0422\u0410 | \u0420\u0411\u041C\u041A-1000 \u0411\u041B\u041E\u041A \u21164');
+    logEvent('info', '\u041D\u0430\u0447\u0430\u043B\u044C\u043D\u043E\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435: N = ' + Math.round(S.n * RBMK.N_NOM) + ' \u041C\u0412\u0442, \u041E\u0417\u0420 = ' + S.opr + ' \u0441\u0442.');
+
+    lastTime = 0;
+    if (animId) cancelAnimationFrame(animId);
+    animId = requestAnimationFrame(loop);
+  }
+
+  window.App = { startGame: startGame, showAbout: showAbout, closeAbout: closeAbout };
+
   function initSlider() {
     var slider = gt('slider-target');
     if (!slider) return;
+    if (slider._listening) return;
+    slider._listening = true;
     slider.addEventListener('input', function() {
       var v = parseFloat(slider.value);
       RBMK.setTargetPower(v);
@@ -96,6 +126,8 @@
 
   function initRockers() {
     document.querySelectorAll('.rocker').forEach(function(group) {
+      if (group._listening) return;
+      group._listening = true;
       group.querySelectorAll('button').forEach(function(btn) {
         btn.addEventListener('click', function() {
           group.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
@@ -116,7 +148,8 @@
 
   function initPumps() {
     var bank = gt('pump-bank');
-    if (!bank) return;
+    if (!bank || bank._listening) return;
+    bank._listening = true;
     bank.innerHTML = '';
     for (var i = 1; i <= 8; i++) {
       var btn = document.createElement('button');
@@ -133,7 +166,8 @@
 
   function initAZ5() {
     var btn = gt('btn-az5');
-    if (!btn) return;
+    if (!btn || btn._listening) return;
+    btn._listening = true;
     btn.addEventListener('click', function() {
       RBMK.manualAZ();
     });
@@ -159,6 +193,8 @@
 
   function initAlarmLamps() {
     document.querySelectorAll('.lamp-unit').forEach(function(el) {
+      if (el._listening) return;
+      el._listening = true;
       el.addEventListener('click', function() {
         var key = el.dataset.lamp;
         el.classList.toggle('on-red');
@@ -168,11 +204,6 @@
   }
 
   function init() {
-    S.onEvent = logEvent;
-    S.onAlarm = function(key, val) {
-      logEvent(val ? 'alarm' : 'info', key + ' ' + (val ? '\u52A8\u4F5C' : '\u590D\u5F52'));
-    };
-
     fetch('version.json').then(function(r) { return r.json(); }).then(function(v) {
       VERSION = v;
       console.log('\u0429\u0418\u0422 ' + fmtVer(v) + ' \u00B7 ' + v.author);
@@ -183,29 +214,23 @@
       console.log('\u0429\u0418\u0422 v0.1.0 (\u0441\u0431.2026.07.30, \u0420\u042D-86/12) \u00B7 sx1922');
     });
 
-    logEvent('info', '\u4EFF\u771F\u7CFB\u7EDF\u542F\u52A8 | \u0420\u0411\u041C\u041A-1000 \u0411\u041B\u041E\u041A \u21164');
-    logEvent('info', '\u521D\u59CB\u72B6\u6001: N = ' + Math.round(S.n * RBMK.N_NOM) + ' \u041C\u0412\u0442, \u041E\u0417\u0420 = ' + S.opr + ' \u0441\u0442.');
-
-    initSlider();
-    initRockers();
-    initPumps();
-    initAZ5();
-    initAlarmLamps();
-    Props.init();
-
     gt('btn-about-close').addEventListener('click', closeAbout);
     gt('about-overlay').addEventListener('click', function(e) {
       if (e.target === gt('about-overlay')) closeAbout();
     });
     var aboutBtn = document.querySelector('.prop[data-prop="about"]');
-    if (aboutBtn) aboutBtn.addEventListener('click', showAbout);
+    if (aboutBtn) aboutBtn.addEventListener('click', function() { App.showAbout(); });
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') closeAbout();
     });
 
-    lastTime = 0;
-    if (animId) cancelAnimationFrame(animId);
-    animId = requestAnimationFrame(loop);
+    gt('room').style.display = 'none';
+
+    Boot.play(function() {
+      Menu.show(function() {
+        App.startGame();
+      });
+    });
   }
 
   document.addEventListener('DOMContentLoaded', init);

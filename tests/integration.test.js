@@ -14,23 +14,23 @@ import {
   getReactorPeriod,
   isSteadyState,
   REACTOR_CONFIG,
-} from '../core/reactor.js';
+} from '../lib/reactor.js';
 
 import {
   integralRodWorth,
   differentialRodWorth,
   tipEffect,
   simulateAZ5Insertion,
-} from '../systems/control.js';
+} from '../lib/systems/control.js';
 
 import {
   totalReactivity,
   getReactivityBreakdown,
-} from '../physics/reactivity.js';
+} from '../lib/physics/reactivity.js';
 
 import {
   calcOPR,
-} from '../physics/xenon.js';
+} from '../lib/physics/xenon.js';
 
 var totalTests = 0;
 var passedTests = 0;
