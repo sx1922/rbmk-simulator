@@ -1,0 +1,10 @@
+{
+  "name": "ЩИТ",
+  "version": "0.1.0",
+  "build": "2026.07.30",
+  "revision": "РЭ-86/12",
+  "codename": "Первый щит",
+  "author": "sx1922",
+  "platform": "web",
+  "notes": "控制室面板 + 物理仿真初始版本"
+}

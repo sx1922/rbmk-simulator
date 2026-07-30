@@ -491,6 +491,7 @@ const Props = (() => {
           case 'dosimeter': openDosimeter(); break;
           case 'phone': openPhone(); break;
           case 'coffee': openCoffee(); break;
+          case 'about': /* handled in app.js */ break;
         }
       });
     });

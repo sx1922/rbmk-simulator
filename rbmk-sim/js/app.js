@@ -2,10 +2,30 @@
   const gt = id => document.getElementById(id);
   const S = RBMK.S;
 
+  let VERSION = null;
   let lastTime = 0;
   let animId = null;
 
   const LOG_MAX = 50;
+
+  function fmtVer(v) {
+    return 'v' + v.version + ' (\u0441\u0431.' + v.build + ', ' + v.revision + ')';
+  }
+
+  function showAbout() {
+    if (!VERSION) return;
+    gt('about-version').textContent = 'v' + VERSION.version + ' \u00AB' + VERSION.codename + '\u00BB';
+    gt('about-build').textContent = VERSION.build;
+    gt('about-revision').textContent = VERSION.revision;
+    gt('about-author').textContent = VERSION.author;
+    gt('about-platform').textContent = VERSION.platform === 'web' ? 'Web (Canvas 2D)' : 'L\u00d6VE 2D';
+    gt('about-notes').textContent = VERSION.notes;
+    gt('about-overlay').classList.remove('hidden');
+  }
+
+  function closeAbout() {
+    gt('about-overlay').classList.add('hidden');
+  }
 
   function logEvent(type, msg) {
     const strip = gt('log-strip');
@@ -153,6 +173,16 @@
       logEvent(val ? 'alarm' : 'info', key + ' ' + (val ? '\u52A8\u4F5C' : '\u590D\u5F52'));
     };
 
+    fetch('version.json').then(function(r) { return r.json(); }).then(function(v) {
+      VERSION = v;
+      console.log('\u0429\u0418\u0422 ' + fmtVer(v) + ' \u00B7 ' + v.author);
+      gt('stamp-version').textContent = 'v' + v.version;
+      gt('stamp-build').textContent = '\u0441\u0431.' + v.build;
+      gt('stamp-revision').textContent = v.revision;
+    }).catch(function() {
+      console.log('\u0429\u0418\u0422 v0.1.0 (\u0441\u0431.2026.07.30, \u0420\u042D-86/12) \u00B7 sx1922');
+    });
+
     logEvent('info', '\u4EFF\u771F\u7CFB\u7EDF\u542F\u52A8 | \u0420\u0411\u041C\u041A-1000 \u0411\u041B\u041E\u041A \u21164');
     logEvent('info', '\u521D\u59CB\u72B6\u6001: N = ' + Math.round(S.n * RBMK.N_NOM) + ' \u041C\u0412\u0442, \u041E\u0417\u0420 = ' + S.opr + ' \u0441\u0442.');
 
@@ -162,6 +192,16 @@
     initAZ5();
     initAlarmLamps();
     Props.init();
+
+    gt('btn-about-close').addEventListener('click', closeAbout);
+    gt('about-overlay').addEventListener('click', function(e) {
+      if (e.target === gt('about-overlay')) closeAbout();
+    });
+    var aboutBtn = document.querySelector('.prop[data-prop="about"]');
+    if (aboutBtn) aboutBtn.addEventListener('click', showAbout);
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeAbout();
+    });
 
     lastTime = 0;
     if (animId) cancelAnimationFrame(animId);
