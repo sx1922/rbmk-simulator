@@ -339,3 +339,65 @@ addTest('scoring: 值班报告生成', function()
   assertTrue(report:find('ЧЕРНОБЫЛЬСКАЯ', 1, true) ~= nil, '报告应含抬头')
   assertTrue(report:find('Блок №4', 1, true) ~= nil, '报告应含机组号')
 end)
+
+-- ==================== instrument 层 ====================
+
+local Instrument = require('src.instrument')
+
+addTest('instrument: 一阶滞后收敛到真值', function()
+  Instrument.init()
+  local v = 0
+  for _ = 1, 200 do
+    v = Instrument.update('power', 1.0, 0.05)
+  end
+  assertNear(v, 1.0, 0.02, '滞后应收敛')
+end)
+
+addTest('instrument: 量程截断与切换瞬态', function()
+  Instrument.init()
+  -- 注：web 原版 currentRange=2 时索引指向 {id:2, max:0.10}（量程1），
+  -- 全量对齐保留该行为：默认档位下 >0.10 打表
+  assertEq(Instrument.truncatePower(0.05), 0.05, '量程带内直通')
+  assertEq(Instrument.truncatePower(0.5), 0.1, '默认档 >0.10 打表（对齐 web）')
+  assertEq(Instrument.truncatePower(1e-5), 0, '低于下限归零')
+  Instrument.switchRange(0)
+  assertEq(Instrument.currentRangeId(), 0)
+  assertEq(Instrument.truncatePower(5e-4), 5e-4, '源量程带内直通')
+  assertEq(Instrument.truncatePower(5e-3), 1e-3, '源量程超上限打表')
+  Instrument.switchRange(3)
+  assertEq(Instrument.truncatePower(0.5), 0.5, '量程2 (id:3) 带内直通')
+  assertTrue(Instrument.switching(), '切换后应有瞬态')
+  Instrument.updateTimer(1.0)
+  assertTrue(not Instrument.switching(), '0.8s 后瞬态结束')
+  Instrument.switchRange(3)
+end)
+
+addTest('instrument: 报警灯 4 态全路径', function()
+  Instrument.initLamps()
+  Instrument.lampSet('CLAD', true)
+  assertEq(Instrument.lampState('CLAD'), 'FAST_BLINK', '新报警 → 快闪')
+  Instrument.kvit()
+  assertEq(Instrument.lampState('CLAD'), 'ON', 'КВИТ → 常亮')
+  Instrument.lampSet('CLAD', false)
+  assertEq(Instrument.lampState('CLAD'), 'SLOW_BLINK', '条件消除 → 慢闪')
+  Instrument.kvit()
+  assertEq(Instrument.lampState('CLAD'), 'OFF', '慢闪经再次 КВИТ → 灭')
+end)
+
+addTest('instrument: 灯驱动条件映射', function()
+  Instrument.initLamps()
+  local S = {
+    separator_level = 0.3, separator_pressure = 6.9, feedwater_temp = 250,
+    clad_temp_max = 350, flow = 100, clad_integrity = 1.0,
+    reactor_period = math.huge, decay_heat_power = 0, containment_dose_rate = 0.1,
+  }
+  Instrument.updateLamps(S)
+  assertEq(Instrument.lampState('SEP_LO'), 'FAST_BLINK', '水位低应报警')
+  S.separator_level = 1.0
+  Instrument.updateLamps(S)
+  assertEq(Instrument.lampState('SEP_LO'), 'OFF', '未 КВИT 前快闪直接熄灭（对齐 web set()）')
+  S.containment_dose_rate = 5
+  Instrument.updateLamps(S)
+  assertEq(Instrument.lampState('RAD'), 'FAST_BLINK', '辐射升高应报警')
+  Instrument.initLamps()
+end)
