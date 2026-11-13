@@ -1,5 +1,35 @@
 # Changelog
 
+## [v0.2.4] · 日.2026.11.14 · РЭ-86/16 — LÖVE 2D 全量对齐
+
+### 新增（`love/` · 分支 `love-version`）
+- **运行时骨架重写**：`love/main.lua` 由 Phase-2 占位（17 行空回调）重写为完整实时循环——`love.update → App.update` 四态状态机 MENU/PLAYING/ENDING/DEBRIEF（FLOW-01 §2），1600×900 设计坐标 letterbox（`Layout`），1280×800 可缩放窗口，`identity=rbmk-simulator`（存档落 `rbmk_journal`）
+- **物理引擎 v2 移植**（`love/src/engine.lua`）：`web/js/engine.js` 1:1——半隐式点堆动力学、氙/碘坑、空泡、ОЗР、棒控/驱动过热闭锁、热工、П1–П5 保护、熔毁链路，v2 增量系统（汽水分离器/给水温度/包壳完整性/衰变热 Way-Wigner/周期/四象限/辐射/驱动机构）。`reset()` 语义与 web 逐字段对齐（flow/targetPower/rodSpeed/protections 故意不重置）。**种子化等价性验证**：同 LCG 注入下 Lua 与 node 轨迹逐位一致（`tests/equiv_check.lua`）
+- **场景引擎**（`love/src/scenario.lua`）：事件运行时（time/condition/priority、pending 延迟队列、sim_override ramp+hold、分支武装/裁决/超时、旗标、决策、目标完成）+ ХРОНИКА-04 全量事件数据：六幕 + 停堆线 2B/3B + 隐藏结局（拒绝断 САОР）+ 灾后第六幕
+- **无尽运营**（`love/src/endless.lua`）：逐月结算、电价模型（季节/周波/负载/事件修饰）、10 类加权事件（泵/蒸汽/柴油机/燃料棒/供货商/工人/暴风雨/士气/调度/检查）、换料与大修期限、班组管理（招聘/解雇/奖金）、7 经营目标、10 持久化成就、存档/继续（引擎快照 `exportState`）、最高分
+- **挑战模式**（`love/src/challenge.lua`）：15 分钟限时排障（泵跳闸/蒸汽泄漏面板/调度指令/周期/ОЗР 事件、抢修状态、计分、最高分）
+- **桌面道具**（`love/src/props.lua`）：道具条 + 模态面板——15 页运行规程（页签 + 第11页彩蛋 → `discovered_page_47`）、值班日志（自动记录只读副本）、МК-61 计算器（含 OPR/Xe 读数键）、ДП-5В 剂量计（对数表盘 + ×1~×10k 量程 + 实时盖格咔哒）、ВЧ 电话（听筒/12 键拨盘/0701-0705 定向应答/空号忙音）、号码簿一键拨号、茶炉（倒茶→三口→`action_tea_drunk` 第一幕旗标）、日历涂画（钢笔/铅笔/橡皮，笔画按模式持久化 `rbmk_cal_draw_*`）
+- **主控室 HUD**（`love/src/ui/hud.lua`）：REACTOR_UI_ADAPT 四区域适配——功率/周期（对数）表盘、ОЗР/氙/空泡/燃料读数、四象限小表（总/分切换）、棒位条 + 目标功率滑杆、模式 rocker、提插棒、АЗ-5 玻璃罩/按钮/钥匙、分离器液位竖条 + 压力表、给水/蒸汽/衰变热、汽机阀滑杆、8×ГЦН 泵阵、量程 rocker、报警灯阵 + КВИТ、值班日志条；story 幕次/任务条、endless 日期/资金/燃耗 HUD、电话/对话浮层、点火/熔毁演出
+- **主菜单 + 整定设置**（`love/src/menu.lua`）：ПУСК/АРХИВ(未开放)/НАСТРОЙКИ/ВЫХОД 双栏菜单、模式列表（含无尽继续按钮）、退班二次确认、6 分区设置屏（滑杆/开关/还原出厂/清档），持久化到 `rbmk_journal`
+- **暂停 + 结算**（`love/src/pause.lua` / `debrief.lua`）：Esc 暂停浮层（继续/整定/结束值班 + F12 确认框）、双栏结算画面（终局类型/五维评分/关键决策/历史匹配度、story 尾声逐行淡入、endless/challenge 结算细分）
+- **仪表中间层**（`love/src/instrument.lua`）：量程截断/一阶滞后/噪声/故障注入 + 报警灯四态机（OFF→FAST→ON→SLOW→OFF）
+- **存档/评分**（`love/src/journal.lua` / `scoring.lua` / `kvstore.lua`）：`rbmk_journal` 值班日志（设置/班次条目/统计）与 web 键名统一；五维评分 + ASCII 值班报告 + 历史匹配度（MatchScorer 1:1）；`rbmk_endless_*`/`rbmk_challenge_best` KV 持久化
+- **音效层**（`love/src/audio/synth.lua` 扩展）：控制室底噪循环、熔毁轰鸣、结算/纸张/缩放/喝茶/倒茶、电话音、盖格计数器（剂量率驱动调度，0.2→0.2-1→1-10→10-100→100+ 五档频率）、主音量/静音
+- **教学引导**（`love/src/tutorial.lua`）：13 步——道具步骤「打开→关闭」检测推进、操作步骤状态条件自动推进
+
+### 测试
+- `love/tests/headless.lua`：无 LÖVE 二进制的 headless 测试框架（love.* stub + 种子化 LCG），`lua love/tests/headless.lua` 直接运行
+- 52 项测试全绿：动力学轨迹与 web 基准逐位一致、AZ-5 正停堆效应尖峰、衰变热衰减、氙坑、保护动作、v2 系统行为、快照往返、journal 往返/损坏回退、评分/评级/匹配度、场景六幕链路（分支三线 + 结局）、无尽经济/月结算/破产/成就/存档、挑战计分/超时/持久化、仪表层/灯态机
+- `love . test` 钩子（`tests/run2.lua`）复用同一套用例跑在真实 LÖVE 环境
+
+### 保留的 web 原版行为（全量对齐含缺陷）
+- 默认量程索引错位：`DETECTOR_RANGES[currentRange]` 指向量程 1（max 0.10），默认档下 >10% 打表——与 web 完全一致
+- `initFullPower` 开局因分离器水位流失→流量抖动→正空泡反应性触发 П1 停堆（story 模式由 `sim_override` 钳制功率，与 web 相同）
+
+### 已知差异（记录在案）
+- 值班日志道具为只读自动记录版（web 版可手写 12 行）；手册涂画未实现（日历涂画已实现）
+- `love` 二进制未在本机安装：运行时渲染路径经静态审查 + 语法校验，未做真机冒烟（`love .` 待装 LÖVE 11.x 后执行）
+
 ## [v0.2.3] · сб.2026.08.01 · РЭ-86/15 (continued)
 
 ### 修复

@@ -1,10 +1,10 @@
 {
   "name": "ЩИТ",
   "version": "0.1.0",
-  "build": "2026.07.30",
-  "revision": "РЭ-86/12",
+  "build": "2026.11.14",
+  "revision": "РЭ-86/16",
   "codename": "Первый щит",
   "author": "sx1922",
-  "platform": "web",
-  "notes": "控制室面板 + 物理仿真初始版本"
+  "platform": "love",
+  "notes": "LÖVE 2D 全量对齐 Web v0.2.3：实时循环 + 引擎 v2 + 场景/无尽/挑战 + 道具/演出"
 }
