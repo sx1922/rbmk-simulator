@@ -685,32 +685,36 @@ end
 
 -- ==================== 无尽面板（结算/事件，切片3 完善） ====================
 
+-- App 状态联动（避免循环 require：app.boot 时注册）
+local panelOpenCb, panelCloseCb, bankruptCb = nil, nil, nil
+function Hud.setPanelCallbacks(onOpen, onClose, onBankrupt)
+  panelOpenCb = onOpen
+  panelCloseCb = onClose
+  bankruptCb = onBankrupt
+end
+
 function Hud.showEndlessSettle(d)
   panel = {
     kind = 'settle',
     data = d,
     buttons = {},
   }
-  App.paused = true
-  App.endlessPanelLock = true
+  if panelOpenCb then panelOpenCb() end
 end
 
-function Hud.showEndlessEvent(evt)
+function Hud.showEndlessEvent(evt, router)
   panel = {
     kind = 'event',
     data = evt,
+    router = router,
     buttons = {},
   }
-  App.paused = true
-  App.endlessPanelLock = true
+  if panelOpenCb then panelOpenCb() end
 end
 
 function Hud.closeEndlessPanel()
   panel = nil
-  if not App.endLock and App.state == 'PLAYING' then
-    App.paused = false
-  end
-  App.endlessPanelLock = false
+  if panelCloseCb then panelCloseCb() end
 end
 
 function Hud.endlessPanelOpen() return panel ~= nil end
@@ -752,7 +756,7 @@ local function drawEndlessPanel()
       y = y + 40
       if button(px + pw / 2 - 80, y, 160, 38, '最终结算', { danger = true }) then
         Hud.closeEndlessPanel()
-        App.endGame('BANKRUPT', {})
+        if bankruptCb then bankruptCb() end
       end
     else
       if button(px + pw / 2 - 80, y + 16, 160, 38, '继续运营 · ⏎', {}) then
@@ -764,8 +768,12 @@ local function drawEndlessPanel()
     W.textBlock(px + 48, y, pw - 96, d.desc or ''); y = y + 76
     for _, opt in ipairs(d.options or {}) do
       if button(px + 48, y, pw - 96, 40, opt.label, {}) then
-        local okE, Endless = pcall(require, 'src.endless')
-        if okE and Endless.choose then Endless.choose(d.id, opt.id) end
+        if panel.router then
+          panel.router(d.id, opt.id)
+        else
+          local okE, Endless = pcall(require, 'src.endless')
+          if okE and Endless.choose then Endless.choose(d.id, opt.id) end
+        end
         Hud.closeEndlessPanel()
         return
       end

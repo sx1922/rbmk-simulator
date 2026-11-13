@@ -543,3 +543,220 @@ addTest('scenario: 熔毁早期直接结局', function()
   assertEq(endType, 'EXPLOSION', '白班熔毁应直接爆炸结局')
   assertTrue(sc:isFinished())
 end)
+
+-- ==================== endless 无尽运营 ====================
+
+local KvStore = require("src.kvstore")
+local Endless = require("src.endless")
+
+addTest('endless: 初始状态', function()
+  KvStore.remove('rbmk_endless_save')
+  KvStore.remove('rbmk_endless_achievements')
+  KvStore.remove('rbmk_endless_best')
+  local E = Endless.createGame()
+  assertEq(E.money, 8000000, '初始资金')
+  assertEq(#E.crew, 8, '班组 8 人')
+  assertEq(#E.goals, 7, '经营目标 7 项')
+  assertEq(E.overhaulDueAt, 12 * Endless.MONTH_S, '大修周期 12 月')
+end)
+
+addTest('endless: 日期推算', function()
+  Endless.createGame()
+  Endless._seek(0)
+  local h = Endless.getHud()
+  assertEq(h.day, 1, '第 1 天')
+  assertEq(h.month, 1, '第 1 月')
+  assertEq(h.shift, 1, '班次 1')
+  assertEq(h.dateStr, '01.05.1986', '起始日期 1986.05.01')
+end)
+
+addTest('endless: 售电收入与燃耗', function()
+  T.seed(42)
+  local E = Endless.createGame()
+  Endless._seek(0)
+  local money0 = E.money
+  local S = { n = 1.0, meltdown = false, pumps = { true, true, true, true, true, true, true, true } }
+  Endless.update(3600, S)  -- 满功率 1 小时
+  assertTrue(E.money > money0, '售电后资金应增加')
+  assertNear(E.energyMWh, 3200, 1, '发电量 3200 MWh')
+  assertNear(E.burnup, 3.1 / Endless.MONTH_S * 3600, 0.01, '燃耗累积')
+end)
+
+addTest('endless: 月度结算 + 首月盈利目标', function()
+  T.seed(42)
+  local E = Endless.createGame()
+  Endless._seek(0)
+  local settled = nil
+  Endless.on('settle', function(d) settled = d end)
+  local S = { n = 1.0, meltdown = false, pumps = { true, true, true, true, true, true, true, true } }
+  Endless.update(Endless.MONTH_S + 1, S)
+  assertTrue(settled ~= nil, '应触发月结算')
+  assertEq(E.monthIdx, 1, '进入第 2 月')
+  assertTrue(E.monthProfit > 0, '满功率月度应盈利')
+  -- g_profit_first：checkGoals 在 monthChange 之前求值（与 web 同序），下帧生效
+  Endless.update(1, S)
+  local g1 = E.goals[1]
+  assertEq(g1.done, true, '首月盈利目标应达成')
+end)
+
+addTest('endless: 事件处理 — 泵维修', function()
+  T.seed(42)
+  local E = Endless.createGame()
+  E.event = { id = 'pump_fail_3', options = { { id = 'fast' }, { id = 'slow' } }, data = { idx = 3 } }
+  local money0 = E.money
+  Endless.choose('fast')
+  assertEq(E.money, money0 - 500000, '立即维修扣 ₽0.5M')
+  assertEq(#E.pendingPumps, 1, '维修队列 +1')
+  assertEq(E.pumpRepairs, 1, '维修计数')
+  assertEq(E.event, nil, '事件已消费')
+end)
+
+addTest('endless: 连续亏损破产', function()
+  T.seed(42)
+  local E = Endless.createGame()
+  Endless._seek(0)
+  local gameOver = false
+  Endless.on('gameover', function() gameOver = true end)
+  local settles = 0
+  Endless.on('settle', function(d)
+    settles = settles + 1
+    if d.bankrupt then assertEq(E.bankrupt, true) end
+  end)
+  local S = { n = 0, meltdown = false, pumps = {} }
+  -- 每月巨额罚款制造亏损
+  for i = 1, 8 do
+    E.monthFines = 20000000
+    E.simTime = (i - 1) * Endless.MONTH_S + 1
+    Endless.update(Endless.MONTH_S, S)
+    E.monthFines = 0
+    if E.bankrupt then break end
+  end
+  assertTrue(E.bankrupt, '连续 6 月亏损应破产')
+  assertTrue(gameOver, '应发出 gameover')
+  assertTrue(E.finished, '运营结束')
+end)
+
+addTest('endless: 成就持久化', function()
+  T.seed(42)
+  KvStore.remove('rbmk_endless_achievements')
+  local E = Endless.createGame()
+  Endless.unlockAch(E, 'a_meltdown')
+  local list = Endless.getAchList()
+  local found = false
+  for _, a in ipairs(list) do
+    if a.id == 'a_meltdown' then found = a.unlocked end
+  end
+  assertTrue(found, '成就应解锁')
+  -- 重新读取（持久化）
+  local list2 = Endless.getAchList()
+  for _, a in ipairs(list2) do
+    if a.id == 'a_meltdown' then assertTrue(a.unlocked, '成就应持久化') end
+  end
+end)
+
+addTest('endless: 存档往返', function()
+  T.seed(42)
+  Endless.createGame()
+  Endless._seek(2 * Endless.MONTH_S)
+  local E = Endless.current()
+  E.money = 12345678
+  assertTrue(Endless.saveGame(), '存档应成功')
+  assertTrue(Endless.hasSave())
+  local info = Endless.saveInfo()
+  assertEq(info.month, 3, '存档月份')
+  Endless.reset()
+  local R = Endless.resumeGame()
+  assertTrue(R ~= nil, '应恢复运营')
+  assertEq(R.money, 12345678, '资金恢复')
+  assertEq(Endless.current(), R, 'current 已切换')
+  Endless.reset()
+  KvStore.remove('rbmk_endless_save')
+end)
+
+addTest('endless: 得分公式', function()
+  T.seed(42)
+  local E = Endless.createGame()
+  E.energyMWh = 1000000  -- 1000 GWh
+  E.daysRun = 100
+  E.profitTotal = 20000000
+  E.powerSum = 900
+  E.powerTime = 1000
+  local st = Endless.getStats(0)
+  assertEq(st.gwh, 1000, 'GWh')
+  assertEq(st.days, 100)
+  local expect = math.floor(1000 * 5 + 0.5) + math.floor(100 * 10 + 0.5)
+    + math.max(0, math.floor(100 * 2 - 0 - E.alarmCount * 15 + 0.5))
+    + math.floor(20000000 / 1000 + 0.5) + math.floor(90 * 8 + 0.5)
+  assertEq(st.score, expect, '得分公式')
+end)
+
+-- ==================== challenge 挑战模式 ====================
+
+local Challenge = require('src.challenge')
+
+addTest('challenge: 初始化', function()
+  KvStore.remove('rbmk_challenge_best')
+  T.seed(42)
+  Challenge.init()
+  local C = Challenge.current()
+  assertTrue(C ~= nil, '状态创建')
+  assertNear(C.timeLeft, Challenge.DURATION_S, 1e-9, '15 分钟倒计时')
+  assertNear(Engine.S.n, 1.0, 1e-9, '满功率开局')
+  assertEq(Engine.S.timeScale, 10, '×10 加速')
+end)
+
+addTest('challenge: 稳定功率得分累积', function()
+  T.seed(42)
+  Challenge.init()
+  local S = { n = 0.62, targetPower = 62, azFired = false, meltdown = false, pumps = {} }
+  Challenge.update(10, S)
+  local C = Challenge.current()
+  assertNear(C.score, 15, 0.1, 'err<5 时 1.5/s × 10s')
+end)
+
+addTest('challenge: AZ-5 扣分一次性', function()
+  T.seed(42)
+  Challenge.init()
+  local S = { n = 0.62, targetPower = 62, azFired = true, meltdown = false, pumps = {} }
+  Challenge.update(5, S)
+  local C = Challenge.current()
+  assertEq(C.scrams, 1, '记录停堆')
+  assertNear(C.score, 7.5 - 500, 0.1, '-500 分')
+  Challenge.update(5, S)
+  assertEq(C.scrams, 1, '不重复扣')
+end)
+
+addTest('challenge: 蒸汽泄漏处置', function()
+  T.seed(42)
+  Challenge.init()
+  local C = Challenge.current()
+  C.event = { kind = 'steam_leak', timeout = 30 }
+  local before = C.score
+  Challenge.choose('fix')
+  assertEq(C.repairing, true, '进入抢修')
+  assertNear(C.score, before + 150, 1e-9, '+150')
+  assertNear(Engine.S.targetPower, 3, 1e-9, '功率降至 3%')
+end)
+
+addTest('challenge: 倒计时结束触发 complete', function()
+  T.seed(42)
+  Challenge.init()
+  local completed = false
+  Challenge.on('complete', function() completed = true end)
+  local S = { n = 0.62, targetPower = 62, azFired = false, meltdown = false, pumps = {} }
+  local C = Challenge.current()
+  C.timeLeft = 0.5
+  Challenge.update(1, S)
+  assertTrue(C.finished, '挑战结束')
+  assertTrue(completed, 'complete 事件')
+  local st = Challenge.getStats()
+  assertEq(st.survived, 901, "存活时长（对齐 web Math.round(900.5)）")
+end)
+
+addTest('challenge: 最高分持久化', function()
+  KvStore.remove('rbmk_challenge_best')
+  Challenge.saveBest(1234)
+  assertEq(Challenge.loadBest(), 1234)
+  Challenge.saveBest(100)
+  assertEq(Challenge.loadBest(), 1234, '低分不覆盖')
+end)

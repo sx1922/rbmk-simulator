@@ -517,6 +517,12 @@ function App.update(dt)
   Instrument.updateTimer(dt)
   updateFloat(dt)
 
+  -- 教程推进
+  if App.state == 'PLAYING' and not App.paused then
+    local okT, Tutorial = pcall(require, 'src.tutorial')
+    if okT and Tutorial.isActive() then Tutorial.update(dt) end
+  end
+
   if App.state == 'PLAYING' and not App.paused then
     local S = Engine.S
     Engine.step(dt)
@@ -575,6 +581,8 @@ function App.draw()
     Menu.draw()
   elseif App.state == 'PLAYING' or App.state == 'ENDING' then
     Hud.draw(App)
+    local okT, Tutorial = pcall(require, 'src.tutorial')
+    if okT and Tutorial.isActive() then Tutorial.draw() end
   elseif App.state == 'DEBRIEF' then
     Hud.draw(App)
     Debrief.draw()
@@ -658,6 +666,16 @@ function App.keypressed(key, scancode, isRepeat)
     App.hideFloat()
     return
   end
+  -- 教程引导（⏎ 推进无状态条件的步骤）
+  do
+    local okT, Tutorial = pcall(require, 'src.tutorial')
+    if okT and Tutorial.isActive() then
+      Tutorial.keypressed(key)
+      if key == 'return' or key == 'kpenter' or key == 'space' then
+        -- 教程已消费 ⏎：非条件步骤推进后仍允许继续（不 return，避免挡住其他键）
+      end
+    end
+  end
   if key == 'escape' then
     App.openPause()
   elseif key == 'f12' then
@@ -721,6 +739,18 @@ function App.resize() end
 function App.boot()
   Layout.calc(love.graphics.getWidth(), love.graphics.getHeight())
   Theme.loadFonts(Layout.scale)
+  Hud.setPanelCallbacks(
+    function()  -- 面板打开：暂停 + 锁定（对齐 web showEndlessPanel）
+      App.paused = true
+      App.endlessPanelLock = true
+    end,
+    function()  -- 面板关闭：恢复（对齐 web closeEndlessPanel）
+      if not App.endLock and App.state == 'PLAYING' then App.paused = false end
+      App.endlessPanelLock = false
+    end,
+    function()  -- 破产最终结算
+      App.endGame('BANKRUPT', {})
+    end)
   local okA, Audio = pcall(require, 'src.audio.synth')
   if okA and Audio.init then pcall(Audio.init) end
   Menu.show(function(m) App.startGame(m) end)

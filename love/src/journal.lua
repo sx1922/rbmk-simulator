@@ -35,6 +35,10 @@ end
 
 -- ==================== 序列化（Lua 表 <-> 字符串） ====================
 
+-- 导出给 kvstore 等模块复用
+Journal.serializeValue = nil -- 见文末赋值
+Journal.deserializeValue = nil
+
 local function serializeVal(v, indent)
   indent = indent or ''
   local t = type(v)
@@ -253,5 +257,8 @@ function Journal.setSetting(journal, key, val)
   end
   o[parts[#parts]] = val
 end
+
+Journal.serializeValue = serializeVal
+Journal.deserializeValue = deserialize
 
 return Journal
