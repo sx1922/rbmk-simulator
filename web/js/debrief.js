@@ -1,4 +1,4 @@
-/* Debrief \u2014 DEBRIEF-01 \u00a72 \u7ed3\u7b97\u753b\u9762 + \u00a73.2 \u5386\u53f2\u5339\u914d\u5ea6 */
+/* Debrief \u2014 \u7ed3\u7b97\u753b\u9762 \u5386\u53f2\u5339\u914d\u5ea6 */
 
 (function() {
   var overlay = null;
@@ -225,7 +225,7 @@
 
   window.Debrief = Debrief;
 
-  /* ================= \u5386\u53f2\u5339\u914d\u5ea6\uff08DEBRIEF-01 \u00a73.2\uff09 ================= */
+  /* ================= \u5386\u53f2\u5339\u914d\u5ea6 ================= */
 
   var SCORE_TABLE = {
     xenon_pit: { continue: 20, shutdown: 10 },

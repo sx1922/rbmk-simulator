@@ -1,4 +1,4 @@
-/* PauseMenu \u2014 FLOW-01 \u00a78-9 \u6682\u505c\u83dc\u5355 + \u7ed3\u675f\u503c\u73ed\u786e\u8ba4 */
+/* PauseMenu \u2014 \u6682\u505c\u83dc\u5355 + \u7ed3\u675f\u503c\u73ed\u786e\u8ba4 */
 
 (function() {
   var overlay = null;

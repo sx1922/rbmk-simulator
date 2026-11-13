@@ -6,7 +6,7 @@
   let lastTime = 0;
   let animId = null;
 
-  /* ================= \u751f\u547d\u5468\u671f\u72b6\u6001\u673a\uff08FLOW-01 \u00a72\uff09 ================= */
+  /* ================= \u751f\u547d\u5468\u671f\u72b6\u6001\u673a ================= */
 
   let state = 'MENU';               // MENU | PLAYING | ENDING | DEBRIEF
   let mode = 'free';
@@ -396,7 +396,7 @@ function newStats() {
     }, autoHideMs);
   }
 
-  /* ================= \u573a\u666f\u5f15\u64ce\u63a5\u5165\uff08SCEN-01 \u00a72\uff09 ================= */
+  /* ================= \u573a\u666f\u5f15\u64ce\u63a5\u5165 ================= */
 
   function simState() {
     return {
@@ -1127,7 +1127,7 @@ function newStats() {
     updateStoryCal();
   }
 
-  /* ================= \u8fd0\u884c\u7edf\u8ba1\u91c7\u96c6\uff08DEBRIEF-01 \u00a73.1\uff09 ================= */
+  /* ================= \u8fd0\u884c\u7edf\u8ba1\u91c7\u96c6 ================= */
 
   function collectStats(dtGame) {
     if (S.n > 1.1) stats.overPowerTime += dtGame;
@@ -1142,7 +1142,7 @@ function newStats() {
     lastRodTarget = S.rodTarget;
   }
 
-  /* ================= \u8bc4\u5206\uff08DEBRIEF-01 \u00a73.1\uff09 ================= */
+  /* ================= \u8bc4\u5206 ================= */
 
   function evaluateScore() {
     try {
@@ -1195,7 +1195,7 @@ function newStats() {
     };
   }
 
-  /* ================= \u7ec8\u5c40\uff08FLOW-01 \u00a73\u3001\u00a75\u3001\u00a77.1\uff09 ================= */
+  /* ================= \u7ec8\u5c40 ================= */
 
   function storyEpilogue(endType, flags) {
     flags = flags || {};
@@ -1386,7 +1386,7 @@ function newStats() {
     animId = requestAnimationFrame(loop);
   }
 
-  /* ================= \u5f00\u59cb\u503c\u73ed\uff08SCEN-01 \u00a76\uff09 ================= */
+  /* ================= \u5f00\u59cb\u503c\u73ed ================= */
 
   function startGame(m) {
     mode = m || 'free';
@@ -1463,7 +1463,7 @@ function newStats() {
     });
   }
 
-  /* ================= \u6682\u505c\uff08FLOW-01 \u00a78-9\uff09 ================= */
+  /* ================= \u6682\u505c ================= */
 
   function openPause() {
     if (state !== 'PLAYING') return;

@@ -1,6 +1,6 @@
 -- v2_tests.lua — 物理引擎 v2 / journal / scoring 测试套件（headless）
 -- 由 headless.lua 载入执行，用 T.addTest / T.assertNear 注册。
--- 引擎测试开头 T.seed(42)：随机序列与 web/node 基准逐位一致（见 tests/equiv_check.lua）。
+-- 引擎测试开头 T.seed(42)：固定随机序列，期望值由 equiv_check.lua 基准生成。
 
 local Engine = require('src.engine')
 local Journal = require('src.journal')
@@ -29,7 +29,7 @@ addTest('kinetics: 冷启动 60gs 轨迹与 web 基准逐位一致', function()
   assertTrue(math.abs(Engine.S.rho) < 0.01, '反应性应近零')
 end)
 
-addTest('kinetics: initFullPower → 保护动作停堆（对齐 web 行为）', function()
+addTest('kinetics: initFullPower → 保护动作停堆', function()
   -- web 基准：满功率初始态下分离器水位流失 → 流量抖动 → 正空泡反应性 → P1 动作
   T.seed(42)
   Engine.reset()
@@ -358,7 +358,7 @@ addTest('instrument: 量程截断与切换瞬态', function()
   -- 注：web 原版 currentRange=2 时索引指向 {id:2, max:0.10}（量程1），
   -- 全量对齐保留该行为：默认档位下 >0.10 打表
   assertEq(Instrument.truncatePower(0.05), 0.05, '量程带内直通')
-  assertEq(Instrument.truncatePower(0.5), 0.1, '默认档 >0.10 打表（对齐 web）')
+  assertEq(Instrument.truncatePower(0.5), 0.1, '默认档 >0.10 打表')
   assertEq(Instrument.truncatePower(1e-5), 0, '低于下限归零')
   Instrument.switchRange(0)
   assertEq(Instrument.currentRangeId(), 0)
@@ -395,7 +395,7 @@ addTest('instrument: 灯驱动条件映射', function()
   assertEq(Instrument.lampState('SEP_LO'), 'FAST_BLINK', '水位低应报警')
   S.separator_level = 1.0
   Instrument.updateLamps(S)
-  assertEq(Instrument.lampState('SEP_LO'), 'OFF', '未 КВИT 前快闪直接熄灭（对齐 web set()）')
+  assertEq(Instrument.lampState('SEP_LO'), 'OFF', '未 КВИT 前快闪直接熄灭')
   S.containment_dose_rate = 5
   Instrument.updateLamps(S)
   assertEq(Instrument.lampState('RAD'), 'FAST_BLINK', '辐射升高应报警')
@@ -750,7 +750,7 @@ addTest('challenge: 倒计时结束触发 complete', function()
   assertTrue(C.finished, '挑战结束')
   assertTrue(completed, 'complete 事件')
   local st = Challenge.getStats()
-  assertEq(st.survived, 901, "存活时长（对齐 web Math.round(900.5)）")
+  assertEq(st.survived, 901, "存活时长")
 end)
 
 addTest('challenge: 最高分持久化', function()

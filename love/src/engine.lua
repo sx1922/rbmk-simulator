@@ -1,4 +1,4 @@
--- engine.lua — ЩИТ 物理引擎 v2 · web/js/engine.js 1:1 移植
+-- engine.lua — ЩИТ 物理引擎 v2
 -- 点堆动力学（半隐式）+ 氙/空泡/OPR/棒控/热工/保护/损伤 + v2 增量系统
 -- （汽水分离器 / 给水温度 / 包壳完整性 / 衰变热 / 周期 / 四象限 / 辐射 / 棒驱动）
 --
@@ -645,8 +645,8 @@ function Engine.importState(snap)
 end
 
 function Engine.reset()
-  -- web reset() 1:1：注意 flow / targetPower / rodSpeed / protections 不在重置清单内
-  -- （保留上次运行残留，首步 stepVoid 会读旧 flow —— 与 web 行为一致）
+  -- 注意 flow / targetPower / rodSpeed / protections 不在重置清单内
+  -- （保留上次运行残留，首步 stepVoid 会读旧 flow ）
   S.t = 0; S.n = 0.625; S.nPrev = 0.625; S.C = 0.625
   S.period = math.huge; S.dndts = 0
   S.rodPos = 47.5; S.rodTarget = 47.5; S.rodHeld = 0; S.autoI = 0

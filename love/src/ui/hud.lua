@@ -1,4 +1,4 @@
--- hud.lua — 主控室 HUD · web/index.html + render.js + REACTOR_UI_ADAPT 的 LÖVE 适配
+-- hud.lua — 主控室 HUD
 -- 设计坐标 1600×900（Layout letterbox）。
 -- 区域：1 反应堆面板 | 2 汽机/给水 | 3 辅助/辐射 | 4 报警灯阵+КВИТ | 底部日志
 -- 浮层：story HUD（幕次/任务/日历）、endless HUD、电话/对话、点火/熔毁演出、无尽面板。

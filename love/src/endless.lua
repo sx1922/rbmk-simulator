@@ -1,4 +1,4 @@
--- endless.lua — БЕСКОНЕЧНЫЙ РЕЖИМ · 无尽模式 · web/js/endless.js 1:1 移植
+-- endless.lua — БЕСКОНЕЧНЫЙ РЕЖИМ · 无尽模式
 -- 功能：逐月结算 / 事件系统 / 燃耗换料 / 机组大修 / 员工班组 / 经营目标 / 成就 / 存档继续
 
 local Engine = require('src.engine')

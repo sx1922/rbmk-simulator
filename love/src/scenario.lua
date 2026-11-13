@@ -1,4 +1,4 @@
--- scenario.lua — SCEN_ENGINE-01 场景事件运行时 · web/js/scenario.js 1:1 移植
+-- scenario.lua — 场景事件运行时
 -- 事件格式：{ id, time|condition, priority, once, actions[] }
 -- 动作：log / flag / sim_override / phone / dialogue / branch / sound / pressure /
 --       endgame / wait / mode / pumps / timescale / timeskip / az / az_reset / target / protections / act / objective

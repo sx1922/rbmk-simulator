@@ -1,5 +1,5 @@
 -- main.lua — ЩИТ LÖVE 端入口 · 四态状态机 + 实时仿真循环
--- FLOW-01 §2: MENU → PLAYING → ENDING → DEBRIEF → MENU
+-- MENU → PLAYING → ENDING → DEBRIEF → MENU
 
 local Layout = require('src.ui.layout')
 local App = require('src.app')

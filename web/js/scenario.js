@@ -1,4 +1,4 @@
-/* ScenarioRuntime — SCEN_ENGINE-01 事件运行时（web 端）
+/* ScenarioRuntime — 事件运行时（web 端）
    事件格式：{ id, time|condition, priority, once, actions[] }
    动作：log / flag / sim_override / phone / dialogue / branch / sound / pressure /
          endgame / wait / mode / pumps / timescale / timeskip / az / target

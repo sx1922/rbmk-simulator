@@ -1,5 +1,5 @@
 -- kvstore.lua — 通用键值持久化（无尽存档 / 成就 / 最高分）
--- 与 web 的 localStorage 键名对应：rbmk_endless_save / rbmk_endless_achievements / rbmk_endless_best
+-- 键名：rbmk_endless_save / rbmk_endless_achievements / rbmk_endless_best
 -- 底层 love.filesystem；headless 测试可注入 adapter。
 
 local Journal = require('src.journal')

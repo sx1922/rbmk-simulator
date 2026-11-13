@@ -1,4 +1,4 @@
--- debrief.lua — DEBRIEF-01 §2 结算画面 + §3.2 历史匹配度（LÖVE 绘制版）
+-- debrief.lua — 结算画面 + 历史匹配度（LÖVE 绘制版）
 -- 双栏：左 = 数据行，右 = 尾声/评语/结算细分；⏎ / Esc 返回主菜单。
 
 local Theme = require('src.ui.theme')

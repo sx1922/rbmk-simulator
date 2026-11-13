@@ -1,6 +1,6 @@
--- app.lua — 生命周期状态机 · web/js/app.js 移植
--- 状态：MENU | PLAYING | ENDING | DEBRIEF（FLOW-01 §2）
--- 终局触发源：MELTDOWN / SCENARIO_END / VOLUNTARY / CHALLENGE_END / BANKRUPT（§3）
+-- app.lua — 生命周期状态机
+-- 状态：MENU | PLAYING | ENDING | DEBRIEF
+-- 终局触发源：MELTDOWN / SCENARIO_END / VOLUNTARY / CHALLENGE_END / BANKRUPT
 
 local Layout = require('src.ui.layout')
 local Theme = require('src.ui.theme')
@@ -99,7 +99,7 @@ local function updateFloat(dt)
   end
 end
 
--- ==================== 运行统计（DEBRIEF-01 §3.1） ====================
+-- ==================== 运行统计  ====================
 
 function App.newStats()
   return Scoring.newStats()
@@ -125,7 +125,7 @@ function App.countOp()
   if App.stats then App.stats.opCount = App.stats.opCount + 1 end
 end
 
--- ==================== 场景引擎接入（SCEN-01 §2） ====================
+-- ==================== 场景引擎接入  ====================
 
 function App.simState()
   local S = Engine.S
@@ -232,7 +232,7 @@ function App.initChallenge()
   Challenge:on('complete', function() App.endGame('SAFE_SHUTDOWN', {}) end)
 end
 
--- ==================== 终局（FLOW-01 §3/§5/§7.1） ====================
+-- ==================== 终局  ====================
 
 local EPILOGUES = {
   epilogue_quiet = '你调制过被批评。你被记过。\n尝试推迟了24小时。\n\n1986年8月，试验在三号机组完成。成功。\n\n你活了下来。\n\n但你知道一件事：\n那个设计缺陷还在。\n它不会因为你的停堆而消失。\n下一次，不一定有人按那个按钮。',
@@ -355,7 +355,7 @@ function App.backToMenu()
   Menu.show(function(m) App.startGame(m) end)
 end
 
--- ==================== 开始值班（SCEN-01 §6） ====================
+-- ==================== 开始值班  ====================
 
 function App.startGame(m)
   App.mode = m or 'free'
@@ -448,7 +448,7 @@ function App.startGame(m)
   end)
 end
 
--- ==================== 暂停（FLOW-01 §8-9） ====================
+-- ==================== 暂停  ====================
 
 function App.openPause()
   if App.state ~= 'PLAYING' then return end
@@ -518,7 +518,7 @@ function App.update(dt)
       App.endingFx = nil
       if done then done() end
     end
-    return  -- 过渡期间不接受模拟推进（FLOW-01 §5）
+    return  -- 过渡期间不接受模拟推进
   end
 
   Instrument.updateTimer(dt)
@@ -592,7 +592,7 @@ function App.draw()
   if App.state == 'MENU' then
     Menu.draw()
   elseif App.state == 'PLAYING' or App.state == 'ENDING' then
-    -- 模态道具打开时抑制 HUD 即时点击（对齐 web 弹层遮罩）
+    -- 模态道具打开时抑制 HUD 即时点击
     local blocked = Props.isOpen() ~= nil
     if blocked then
       local kp, kd, kr = W.mouse.pressed, W.mouse.down, W.mouse.released
@@ -700,7 +700,7 @@ function App.keypressed(key, scancode, isRepeat)
     end
   end
   if key == 'escape' then
-    -- 道具优先关闭（对齐 web：Esc 关道具；无道具时开暂停）
+    -- 道具优先关闭
     if Props.isOpen() then
       Props.closeProp()
       return
@@ -769,11 +769,11 @@ function App.boot()
   Theme.loadFonts(Layout.scale)
   Props.setApp(App)
   Hud.setPanelCallbacks(
-    function()  -- 面板打开：暂停 + 锁定（对齐 web showEndlessPanel）
+    function()  -- 面板打开：暂停 + 锁定
       App.paused = true
       App.endlessPanelLock = true
     end,
-    function()  -- 面板关闭：恢复（对齐 web closeEndlessPanel）
+    function()  -- 面板关闭：恢复
       if not App.endLock and App.state == 'PLAYING' then App.paused = false end
       App.endlessPanelLock = false
     end,

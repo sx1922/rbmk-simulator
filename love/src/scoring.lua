@@ -1,4 +1,4 @@
--- scoring.lua — 结算评分 · web/lib/scoring.js + app.js scoreInner + debrief MatchScorer 移植
+-- scoring.lua — 结算评分
 --
 -- Scoring.ratingFromScore(score) -> RATINGS 项 { min, rating, cn, meaning }
 -- Scoring.evaluate(stats, mode, endType) -> { dimensions, ratings, remarks, outcome }
@@ -40,7 +40,7 @@ function Scoring.newStats()
   }
 end
 
--- ==================== 五维评分（app.js scoreInner 1:1） ====================
+-- ==================== 五维评分  ====================
 
 local DIM_KEYS = { 'procedure', 'safety', 'response', 'equipment', 'completeness' }
 
@@ -180,7 +180,7 @@ function Scoring.generateReport(dims, ratings, remarks, context)
   return table.concat(lines, '\n')
 end
 
--- ==================== 历史匹配度（debrief.js MatchScorer 1:1） ====================
+-- ==================== 历史匹配度  ====================
 
 local SCORE_TABLE = {
   xenon_pit = { ['continue'] = 20, shutdown = 10 },

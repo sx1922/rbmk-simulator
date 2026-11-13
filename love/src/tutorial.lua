@@ -1,4 +1,4 @@
--- tutorial.lua — 第一幕教学引导 · web/js/tutorial.js 的 LÖVE 适配
+-- tutorial.lua — 第一幕教学引导
 -- 步骤：道具教学（⏎ 推进）+ 仪表讲解（⏎ 推进）+ 操作任务（状态条件自动推进）
 -- 启动：App.startGame (story 模式) 点火动画结束后 Tutorial.start(ctx)
 

@@ -1,4 +1,4 @@
--- instrument.lua — 仪表中间层 + 报警灯状态机 · app.js instLayer/alarmLamps 移植
+-- instrument.lua — 仪表中间层 + 报警灯状态机
 -- 物理引擎输出 → 量程截断 → 一阶滞后 → 噪声叠加 → 故障注入 → DisplayValue
 -- 报警灯：OFF → FAST_BLINK →(КВИТ)→ ON →(条件消除)→ SLOW_BLINK → OFF
 

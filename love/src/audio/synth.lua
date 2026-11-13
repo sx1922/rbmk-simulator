@@ -78,7 +78,7 @@ function SFX.init()
 end
 
 
--- ==================== v0.2 扩展：完整音效 API（对齐 web audio.js 调用面） ====================
+-- ==================== v0.2 扩展：完整音效 API  ====================
 
 local masterVolume = 0.8
 local muted = false

@@ -1,4 +1,4 @@
--- pause.lua — FLOW-01 §8-9 暂停菜单 + 结束值班确认（LÖVE 绘制版）
+-- pause.lua — 暂停菜单 + 结束值班确认（LÖVE 绘制版）
 -- 覆盖层：半透明遮罩 + 中央卡片；键盘 ↑↓/⏎/Esc，鼠标可点。
 
 local Theme = require('src.ui.theme')

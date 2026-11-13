@@ -1,4 +1,4 @@
--- challenge.lua — ВЫЗОВ · 挑战模式 (15 分钟限时排障) · web/js/challenge.js 1:1 移植
+-- challenge.lua — ВЫЗОВ · 挑战模式 (15 分钟限时排障)
 -- 目标：在突发故障中保持功率稳定；得分按「存活时间 × 精度 × 处置」计
 
 local Engine = require('src.engine')

@@ -1,5 +1,5 @@
--- journal.lua — 值班日志 / 设置持久化 · web/lib/save.js 移植
--- 键名与 web 版统一：rbmk_journal / rbmk_journal_bak
+-- journal.lua — 值班日志 / 设置持久化
+-- 键名：rbmk_journal / rbmk_journal_bak
 -- LÖVE 下落盘到 love.filesystem（identity 见 conf.lua）；headless 测试可注入 adapter。
 
 local Journal = {}

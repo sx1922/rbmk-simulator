@@ -1,4 +1,4 @@
--- props.lua — 桌面道具 · web/js/props.js + app.js 日历涂画的 LÖVE 适配
+-- props.lua — 桌面道具
 -- 道具：规程手册 / 值班日志 / 计算器 / 剂量计 / 电话 / 号码簿 / 茶炉 / 日历
 -- 旗标联动：喝完茶 → scenario action_tea_drunk；翻到第11页 → discovered_page_47
 
