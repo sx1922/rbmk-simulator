@@ -6,6 +6,8 @@
   var noiseBuffer = null;
   var pinkNoiseBuffer = null;
   var initialized = false;
+  var currentMasterVol = 0.8;
+  var mutedFlag = false;
 
   // ======================== engine ========================
 
@@ -30,6 +32,8 @@
       buses[busNames[i]] = g;
     }
     buses._master = master;
+    currentMasterVol = 0.8;
+    mutedFlag = false;
     noiseBuffer = createNoiseBuffer(ctx, 1);
     pinkNoiseBuffer = createPinkNoiseBuffer(ctx, 2);
     initialized = true;
@@ -37,12 +41,22 @@
   }
 
   function resume() {
-    if (ctx && ctx.state === 'suspended') ctx.resume();
+    if (ctx && ctx.state === 'suspended') {
+      try { ctx.resume().catch(function() {}); } catch (e) {}
+    }
   }
 
   function setMasterVolume(v) {
-    if (buses._master) {
+    currentMasterVol = v;
+    if (!mutedFlag && buses._master) {
       buses._master.gain.setTargetAtTime(v, ctx.currentTime, 0.05);
+    }
+  }
+
+  function setMuted(m) {
+    mutedFlag = !!m;
+    if (buses._master) {
+      buses._master.gain.setTargetAtTime(mutedFlag ? 0 : currentMasterVol, ctx.currentTime, 0.05);
     }
   }
 
@@ -181,6 +195,146 @@
     s.connect(g);
     g.connect(buses.events || buses._master || c.destination);
     s.start(c.currentTime);
+  }
+
+  function noise(dur, vol, cutoff, shape) {
+    ensureCtx();
+    var c = ctx;
+    var rate = c.sampleRate;
+    var b = c.createBuffer(1, rate * dur, rate);
+    var d = b.getChannelData(0);
+    var t = shape || 'linear';
+    for (var i = 0; i < d.length; i++) {
+      var e = t === 'exp' ? Math.exp(-i / (rate * dur * 0.35)) : 1 - i / d.length;
+      d[i] = (Math.random() * 2 - 1) * e * (vol || 0.2);
+    }
+    var s = c.createBufferSource();
+    var f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = cutoff || 1800;
+    s.buffer = b;
+    s.connect(f);
+    f.connect(buses.events || buses._master || c.destination);
+    s.start(c.currentTime);
+  }
+
+  function pour() { // 倒茶水
+    ensureCtx();
+    var c = ctx;
+    var t = c.currentTime;
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    var src = c.createBufferSource();
+    var rate = c.sampleRate;
+    var b = c.createBuffer(1, rate * 0.9, rate);
+    var d = b.getChannelData(0);
+    for (var i = 0; i < d.length; i++) {
+      d[i] = (Math.random() * 2 - 1) * (0.3 + 0.7 * Math.sin(i / 90)) * Math.exp(-i / (rate * 0.5));
+    }
+    var f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 1200;
+    f.Q.value = 0.8;
+    src.buffer = b;
+    src.connect(f);
+    f.connect(g);
+    g.connect(buses.events || buses._master || c.destination);
+    src.start(t);
+  }
+
+  function sip() { // 喝一口茶
+    ensureCtx();
+    var c = ctx;
+    beep(220, 0.05, 'sine', 0.06);
+    setTimeout(function() {
+      var t = c.currentTime;
+      var g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      var src = c.createBufferSource();
+      var rate = c.sampleRate;
+      var b = c.createBuffer(1, rate * 0.25, rate);
+      var d = b.getChannelData(0);
+      for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.sin(i / 40) * (1 - i / d.length);
+      src.buffer = b;
+      src.connect(g);
+      g.connect(buses.events || buses._master || c.destination);
+      src.start(t);
+    }, 60);
+  }
+
+  function coin() { // 月末结算：钱币声
+    ensureCtx();
+    var c = ctx;
+    [880, 1174.7, 1568].forEach(function(f, i) {
+      beep(f, 0.12, 'triangle', 0.08);
+      (function(fr) {
+        setTimeout(function() {
+          var g = c.createGain();
+          g.gain.value = 0.05;
+          g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.15);
+          var o = c.createOscillator();
+          o.type = 'sine';
+          o.frequency.value = fr;
+          o.connect(g);
+          g.connect(buses.events || buses._master || c.destination);
+          o.start(c.currentTime);
+          o.stop(c.currentTime + 0.15);
+        }, i * 110);
+      })(f / 2);
+    });
+  }
+
+  function ding() { // 成就 / 评级
+    ensureCtx();
+    [523.25, 659.25, 783.99, 1046.5].forEach(function(f, i) {
+      setTimeout(function() {
+        beep(f, 0.35, 'sine', 0.09);
+        setTimeout(function() { beep(f * 2, 0.25, 'sine', 0.04); }, 80);
+      }, i * 90);
+    });
+  }
+
+  function scratch() { // 铅笔涂画
+    ensureCtx();
+    noise(0.12, 0.12, 3000, 'exp');
+  }
+
+  function paper() { // 翻页 / 纸张
+    ensureCtx();
+    noise(0.18, 0.16, 2400, 'exp');
+  }
+
+  function zoom() { // 展开放大
+    ensureCtx();
+    noise(0.3, 0.09, 3500, 'linear');
+    beep(660, 0.12, 'sine', 0.03);
+  }
+
+  function rumble() { // 低频轰鸣（熔毁）
+    ensureCtx();
+    var c = ctx;
+    var t = c.currentTime;
+    var o = c.createOscillator();
+    var g = c.createGain();
+    o.type = 'sawtooth';
+    o.frequency.value = 46;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, t + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+    o.connect(g);
+    g.connect(buses.events || buses._master || c.destination);
+    o.start(t);
+    o.stop(t + 1.7);
+    noise(1.4, 0.14, 500, 'exp');
+  }
+
+  function hover() { // 悬停微响
+    ensureCtx();
+    beep(1200, 0.03, 'sine', 0.015);
   }
 
   // legacy alarm tone
@@ -430,19 +584,33 @@
 
   GeigerCounter.prototype._click = function() {
     var c = this.ctx;
-    var osc = c.createOscillator();
+    var t = c.currentTime;
+    var src = c.createBufferSource();
+    var buf = c.createBuffer(1, Math.max(1, Math.floor(c.sampleRate * 0.01)), c.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 0.22));
+    var filt = c.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.value = 2200 + Math.random() * 1800;
+    filt.Q.value = 5;
     var gain = c.createGain();
-    osc.type = 'square';
-    osc.frequency.value = 700 + Math.random() * 500;
-    gain.gain.setValueAtTime(0.25, c.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.004);
-    osc.connect(gain).connect(this.bus);
-    osc.start();
-    osc.stop(c.currentTime + 0.006);
-    osc.onended = function() {
-      try { osc.disconnect(); } catch(e) {}
-      try { gain.disconnect(); } catch(e) {}
-    };
+    gain.gain.setValueAtTime(0.13, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.022);
+    src.buffer = buf;
+    src.connect(filt).connect(gain).connect(this.bus);
+    src.start(t);
+    src.stop(t + 0.03);
+    if (Math.random() < 0.2) {
+      var osc = c.createOscillator();
+      var g2 = c.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 3000 + Math.random() * 800;
+      g2.gain.setValueAtTime(0.045, t + 0.005);
+      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.012);
+      osc.connect(g2).connect(this.bus);
+      osc.start(t + 0.005);
+      osc.stop(t + 0.014);
+    }
   };
 
   function playRelay(bus, variant) {
@@ -1024,6 +1192,7 @@
     getCtx: function() { return ctx; },
     getBus: function(name) { return buses[name]; },
     setMasterVolume: setMasterVolume,
+    setMuted: setMuted,
     getNoiseBuffer: function() { return noiseBuffer; },
     getPinkNoiseBuffer: function() { return pinkNoiseBuffer; },
 
@@ -1086,6 +1255,18 @@
     // narrative
     playPrint: playPrint,
     playVoice: playVoice,
+
+    // misc UI (added)
+    noise: noise,
+    pour: pour,
+    sip: sip,
+    coin: coin,
+    ding: ding,
+    scratch: scratch,
+    paper: paper,
+    zoom: zoom,
+    rumble: rumble,
+    hover: hover,
 
     // mixer
     Mixer: Mixer,

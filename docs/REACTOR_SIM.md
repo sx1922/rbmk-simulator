@@ -1,5 +1,14 @@
 # 反应堆物理模型 — Модель Реактора
 
+## 文档信息
+
+- **文档编号**：GDD-REACTOR-SIM
+- **版本**：2.0.0
+- **状态**：草案
+- **变更记录**：
+  - v1.0（2026-07-30）：初版。点堆 PRKE、氙动力学、空泡效应、温度反馈、控制棒、末端效应、热工水力、泵、保护、OBR。
+  - v2.0（2026-08-02）：升级版。新增汽水分离器模型、给水温度动态、热冲击、控制棒驱动限制、中子探测器量程、仪表动态响应、衰变热、反应堆周期、空间效应（四象限模型）、燃料包壳完整性、辐射模型。**升级原则：不修改 v1.0 方程与参数，只增不改，新模型通过读写 ReactorState 已有字段与 v1.0 模型耦合，所有新增状态量带默认值保证向后兼容。**
+
 ## 设计哲学
 
 这不是"像反应堆"。这是"是反应堆"。
@@ -23,9 +32,9 @@
 
 ### 不做的
 
-- 空间动力学（不做三维中子通量分布）
+- 空间动力学（不做三维中子通量分布）— v2.0 起用四象限模型近似局部功率分布（§9），仍非三维通量
 - 燃料燃耗（场景时间太短，忽略）
-- 裂变产物除氙/碘外（忽略）
+- 裂变产物除氙/碘外（忽略）— v2.0 新增辐射模型追踪冷却剂活度与包壳完整性泄漏，但 Sm-149 等慢毒物仍忽略
 - 结构材料活化（忽略）
 
 ## 状态变量
@@ -68,7 +77,68 @@ interface ReactorState {
 
   // === 时间 ===
   simTime: number;          // 模拟时间（秒）
+
+  // ================= v2.0 新增状态量 =================
+  // === 汽水分离器 ===
+  separator_level: number;        // 汽水分离器水位，m。正常 0.8-1.2
+  separator_pressure: number;     // 分离器压力，MPa。正常 6.9
+  feedwater_flow: number;         // 给水总流量，m³/h。正常 ~5000
+  feedwater_temp: number;         // 给水温度，°C。正常 265-275
+  steam_flow: number;             // 蒸汽总流量，t/h。随功率变化
+
+  // === 燃料包壳 ===
+  clad_integrity: number;         // 包壳完整性，0.0-1.0。1.0=完好
+  clad_temp_max: number;          // 最热通道包壳温度，°C。正常 ~350
+
+  // === 控制棒驱动 ===
+  active_rod_drives: number;      // 当前正在运动的棒数
+  rod_drive_temp: number;         // 驱动机构温度，°C。正常 20
+  rod_drive_overheat: boolean;    // 过热闭锁标志
+  rod_command_queue: RodCommand[];// 排队中的棒指令
+
+  // === 衰变热 ===
+  scram_time: number | null;      // 停堆时刻（null=未停堆）
+  pre_scram_power: number;        // 停堆前稳态功率，MW
+  decay_heat_power: number;       // 当前衰变热功率，MW
+
+  // === 反应堆周期 ===
+  reactor_period: number;         // 反应堆周期，s。∞=功率不变
+  dP_dt: number;                  // 功率变化率，MW/s
+
+  // === 空间效应（象限模型）===
+  quadrant_power: [number, number, number, number]; // 四象限功率，MW
+  quadrant_xenon: [number, number, number, number]; // 四象限氙浓度
+  quadrant_rods: [number, number, number, number];  // 四象限棒插入深度
+
+  // === 辐射 ===
+  coolant_activity: number;       // 冷却剂放射性活度，Bq/m³
+  containment_dose_rate: number;  // 主控室剂量率，mR/h
 }
+
+// v2.0 默认值（全部新增状态量带默认值，保证 v1.0 逻辑在默认值时行为不变）
+const DEFAULT_V2: Partial<ReactorState> = {
+  separator_level: 1.0,
+  separator_pressure: 6.9,
+  feedwater_flow: 5000,
+  feedwater_temp: 270,
+  steam_flow: 1470,
+  clad_integrity: 1.0,
+  clad_temp_max: 350,
+  active_rod_drives: 0,
+  rod_drive_temp: 20,
+  rod_drive_overheat: false,
+  rod_command_queue: [],
+  scram_time: null,
+  pre_scram_power: 0,
+  decay_heat_power: 0,
+  reactor_period: Infinity,
+  dP_dt: 0,
+  quadrant_power: [800, 800, 800, 800],
+  quadrant_xenon: [0, 0, 0, 0],
+  quadrant_rods: [0.5, 0.5, 0.5, 0.5],
+  coolant_activity: 1e3,
+  containment_dose_rate: 0.1,
+};
 
 interface PumpState {
   id: number;               // 1–8
@@ -565,6 +635,41 @@ class ReactorSimulator {
     this.state.simTime += simDt;
   }
 
+  // ================ v2.0 主循环增量 ================
+  // v1.0 函数顺序保持：computeReactivity → solvePRKE → updateXenon →
+  //   computeVoidFraction → computeThermalHydraulics → moveRods → checkAccidentConditions
+  // v2.0 增量（不修改 v1.0 逻辑）：
+  //   computeThermalHydraulics 热源项加衰变热（§7.3）
+  //   moveRodsV2() 替代 moveRods()（§4.2，仅包装，AZ-5 例外）
+  //   新增：updateSeparator / updateFeedwater / updateCladIntegrity /
+  //         updateDecayHeat / updatePeriod / updateQuadrants（条件启用）/
+  //         updateRadiation / updateRodDrives
+  //   checkAccidentConditions 追加 v2 事故条件（§11.3）：包壳破裂、分离器干烧、无棒临界
+
+  updateV2(realDt) {
+    const simDt = this.accidentMode ? realDt : realDt * this.timeScale;
+
+    this.moveRodsV2(simDt);              // v2 替代 moveRods
+    integratePumps(this.state, simDt);
+    updateVoidFraction(this.state, simDt);
+    updateSeparator(this.state, simDt);  // v2 新增
+    updateFeedwater(this.state, simDt);  // v2 新增
+    updateCladIntegrity(this.state, simDt); // v2 新增
+    const rho = computeTotalReactivity(this.state, this.prev_rod_positions);
+    integratePRKE(this.state, rho, simDt);
+    integrateXenon(this.state, simDt);
+    integrateThermal(this.state, simDt); // 热源项改 Q_total = P_fission + decay_heat（§7.3）
+    computePower(this.state);
+    updateDecayHeat(this.state, simDt);  // v2 新增
+    updatePeriod(this.state, simDt);     // v2 新增
+    updateQuadrants(this.state, simDt);  // v2 新增（条件启用 §9.8）
+    updateRadiation(this.state, simDt);  // v2 新增
+    updateRodDrives(this.state, simDt);  // v2 新增
+    this.checkAccidentConditionsV2();    // v1 + v2 事故条件
+    this.prev_rod_positions = [...this.state.rod_positions];
+    this.state.simTime += simDt;
+  }
+
   checkAccidentConditions() {
     if (this.state.P_thermal > 3840) {
       this.triggerAccident('power_excursion');
@@ -773,6 +878,634 @@ function computeOBR(rod_positions) {
 
 现代 CPU ~10⁹ flops → 0.19 ms/帧。完全不是瓶颈。
 
+---
+
+# ==================== v2.0 增量章节（只增不改）====================
+
+> 以下章节为 v2.0 新增。v1.0 的所有方程、参数、验证用例保持有效。新增内容不覆盖、不修改、不替代 v1.0 的任何定义。新模型通过读写 `ReactorState` 已有字段（`P_thermal`、`pump_flow`、`pressure`、`void_fraction` 等）与 v1.0 模型耦合；所有新增状态量有默认值（见"状态变量"章节 `DEFAULT_V2`），在默认值时 v1.0 逻辑行为不变。
+
+## 2 汽水分离器模型
+
+### 2.1 物理背景
+
+RBMK-1000 有 4 台卧式汽水分离器（ДС），每台对应 2 个主循环泵回路。蒸汽从堆芯上升管进入分离器，水从底部经下降管回堆芯。
+
+### 2.2 水位动力学
+
+```
+d(separator_level)/dt = (feedwater_flow - steam_flow) / (ρ_w × A_sep)
+```
+
+- `A_sep = 12.0 m²` — 分离器水侧截面积（简化常数）
+- `ρ_w = 740 kg/m³` — 饱和水密度（6.9 MPa）
+
+单位换算：
+- `feedwater_flow`: m³/h → kg/s: × ρ_w / 3600
+- `steam_flow`: t/h → kg/s: × 1000 / 3600
+
+### 2.3 蒸汽流量与功率耦合
+
+```
+steam_flow = P_thermal / h_fg × 3.6      // t/h
+h_fg = 1500 kJ/kg    // 汽化潜热（6.9 MPa）
+P_thermal: MW → kJ/s: × 1000
+```
+
+即：`steam_flow = P_thermal × 1000 / 1500 × 3.6 = P_thermal × 2.4 t/h`
+
+验证：P = 3200 MW → steam_flow = 7680 t/h（4 台分离器总计，每台 ~1920 t/h，合理）。
+
+### 2.4 分离器压力
+
+```
+d(separator_pressure)/dt = (steam_flow - turbine_steam_flow) / V_sep × K_p
+```
+
+- `V_sep = 30 m³` — 分离器蒸汽侧容积
+- `K_p = 0.002 MPa/(t/h)` — 压力增益系数（标定值）
+- `turbine_steam_flow = steam_flow × valve_opening` — 汽轮机进汽量
+- `valve_opening: 0.0-1.0` — 汽轮机调节阀开度（玩家可控或自动）
+
+### 2.5 水位对泵的约束
+
+```js
+if (separator_level < 0.5) {
+  pump_flow_max = pump_flow_nominal * (separator_level / 0.5);
+  // 水位低 → 泵吸入口露出 → 气蚀 → 流量上限降低
+}
+if (separator_level < 0.3) {
+  pump_cavitation = true;
+  // 泵气蚀：流量剧烈波动，±30% 随机
+}
+```
+
+### 2.6 与 v1.0 的耦合
+
+| v1.0 字段 | 耦合方式 |
+|-----------|----------|
+| `P_thermal` | 决定 steam_flow（§2.3） |
+| `pump_flow`（热工水力章节） | 受 separator_level 约束（§2.5） |
+| `void_fraction`（空泡效应章节） | 受 separator_pressure 影响：压力低 → 饱和温度低 → 同温度下空泡多 |
+
+```js
+void_correction = (P_nominal_pressure - separator_pressure) × 0.02;
+void_fraction_effective = void_fraction + void_correction;
+// 压力每降 1 MPa，空泡份额增加 ~2%
+```
+
+## 3 给水温度动态
+
+### 3.1 模型
+
+```
+d(feedwater_temp)/dt = (T_target - feedwater_temp) / τ_feed
+τ_feed = 120 s    // 给水系统热惯性时间常数
+```
+
+### 3.2 目标温度
+
+| 工况 | T_target | 触发条件 |
+|------|----------|----------|
+| 正常 | 270°C | 默认 |
+| 除氧器失压 | 100°C | 除氧器压力 < 0.1 MPa |
+| САОР 投入 | 40°C | САОР 阀门开启 |
+| 给水加热器切除 | 160°C | 加热器旁路 |
+
+### 3.3 热冲击模型
+
+当给水温度骤变时，燃料包壳承受热应力：
+
+```js
+thermal_shock_index = Math.abs(feedwater_temp - clad_temp_max) * (pump_flow / pump_flow_nominal);
+
+if (thermal_shock_index > 150) {
+  d(clad_integrity)/dt -= (thermal_shock_index - 150) * 0.0001;  // 包壳逐渐损伤
+}
+if (thermal_shock_index > 300) {
+  d(clad_integrity)/dt -= (thermal_shock_index - 300) * 0.001;   // 严重热冲击，快速损伤
+}
+```
+
+### 3.4 包壳完整性后果
+
+```js
+if (clad_integrity < 0.8) {
+  coolant_activity += (1.0 - clad_integrity) * 1e8;  // Bq/m³，裂变产物泄漏到冷却剂
+}
+if (clad_integrity < 0.5) {
+  containment_dose_rate += (0.5 - clad_integrity) * 20;  // mR/h，主控室剂量率上升
+}
+if (clad_integrity < 0.1) {
+  triggerAccident("FUEL_DAMAGE");  // 包壳大面积破裂 → 燃料损坏事故
+}
+```
+
+## 4 控制棒驱动机构限制
+
+### 4.1 约束
+
+```js
+MAX_SIMULTANEOUS_RODS = 40;   // 同时运动上限
+ROD_DRIVE_HEAT_RATE = 0.5;    // °C/s per active rod
+ROD_DRIVE_COOL_RATE = 1/300;  // 冷却时间常数，s⁻¹
+ROD_DRIVE_OVERHEAT_TEMP = 80; // 过热阈值，°C
+ROD_DRIVE_RECOVER_TEMP = 50;  // 恢复阈值，°C
+```
+
+### 4.2 修改 moveRods()（v1.0 函数的包装）
+
+```js
+function moveRodsV2(commands, dt) {
+  // 1. 处理排队
+  const allCommands = [...rod_command_queue, ...commands];
+  rod_command_queue = [];
+
+  // 2. 过热检查
+  if (rod_drive_overheat) {
+    rod_command_queue = allCommands; // 全部排队
+    log("驱动机构过热闭锁");
+    return;
+  }
+
+  // 3. 容量检查
+  const executing = allCommands.slice(0, MAX_SIMULTANEOUS_RODS - active_rod_drives);
+  const queued = allCommands.slice(MAX_SIMULTANEOUS_RODS - active_rod_drives);
+  rod_command_queue = queued;
+  if (queued.length > 0) log(`驱动机构满负荷，${queued.length} 根棒排队`);
+
+  // 4. 调用 v1.0 的 moveRods
+  moveRods(executing, dt);
+  active_rod_drives = executing.length;
+}
+```
+
+### 4.3 驱动机构温度
+
+```js
+d(rod_drive_temp)/dt = active_rod_drives × ROD_DRIVE_HEAT_RATE
+                       - (rod_drive_temp - 20) × ROD_DRIVE_COOL_RATE;
+
+if (rod_drive_temp > ROD_DRIVE_OVERHEAT_TEMP) {
+  rod_drive_overheat = true;
+  active_rod_drives = 0;  // 所有运动中的棒停止，棒停在当前位置
+}
+if (rod_drive_overheat && rod_drive_temp < ROD_DRIVE_RECOVER_TEMP) {
+  rod_drive_overheat = false; // 恢复，排队指令继续执行
+}
+```
+
+### 4.4 例外
+
+`scramAZ5()` 不受此限制。АЗ-5 是重力落棒 + 电磁释放，不依赖驱动电机，所有 211 根棒同时释放。
+
+## 5 中子探测器量程模型
+
+### 5.1 量程定义
+
+```js
+const DETECTOR_RANGES = [
+  { id: 0, name: "源量程",    min: 1e-6, max: 1e-3 },
+  { id: 1, name: "中间量程",  min: 1e-3, max: 0.01 },
+  { id: 2, name: "功率量程1", min: 0.001, max: 0.10 },
+  { id: 3, name: "功率量程2", min: 0.01, max: 1.20 },
+  { id: 4, name: "功率量程3", min: 0.10, max: 1.20 },
+];
+```
+
+### 5.2 读数逻辑
+
+```js
+function readPower(currentRange, truePowerFraction) {
+  const range = DETECTOR_RANGES[currentRange];
+  if (truePowerFraction < range.min) return 0;      // 低于量程下限，读数为零
+  if (truePowerFraction > range.max) return range.max;  // 打表
+  return truePowerFraction;
+}
+```
+
+### 5.3 量程切换瞬态
+
+```js
+function switchRange(newRange) {
+  currentRange = newRange;
+  displayedPower = 0;   // 指针归零
+  switchTimer = 0.8;    // 0.8 秒后恢复正常读数；切换期间功率表读数为 0
+}
+```
+
+### 5.4 游戏性影响
+
+| 场景 | 影响 |
+|------|------|
+| 第一幕降功率到 30 MW（~1%） | 功率量程 3（10%-120%）指针在底部，读数精度极差，需切到量程 2 |
+| 功率飙升到 >120% | 所有功率量程打表，玩家看不到具体值 |
+| 切换量程的 0.8 秒 | 功率表读数为零；若此时功率飙升，玩家会误判 |
+
+## 6 仪表动态响应模型
+
+### 6.1 一阶滞后 + 噪声
+
+```js
+interface InstrumentDynamics {
+  tau: number;              // 时间常数，s
+  noiseAmplitude: number;   // 噪声幅度，%FS
+  noiseFreq: number;        // 噪声主频率，Hz
+  noisePhase: number;       // 随机初始相位
+}
+
+function updateInstrument(inst, trueValue, displayed, dt, simTime) {
+  // 一阶滞后
+  displayed += (trueValue - displayed) * dt / inst.tau;
+  // 周期性噪声
+  const periodic = inst.noiseAmplitude * Math.sin(2 * Math.PI * inst.noiseFreq * simTime + inst.noisePhase);
+  // 随机噪声
+  const random = inst.noiseAmplitude * 0.3 * gaussRandom();
+  return displayed + periodic + random;
+}
+```
+
+### 6.2 各仪表参数
+
+| 仪表 | τ (s) | 噪声 (%FS) | 频率 (Hz) | 备注 |
+|------|-------|-----------|-----------|------|
+| 热功率表 | 0.5 | 0.3 | 0.8 | 快响应 |
+| 周期表 | 1.0 | 0.5 | 0.5 | |
+| 出口水温 | 3.0 | 0.2 | 0.3 | 热惯性大 |
+| 分离器压力 | 2.0 | 0.3 | 0.4 | |
+| 分离器水位 | 1.5 | 0.4 | 0.6 | 波动明显 |
+| 给水流量 | 1.0 | 0.5 | 1.0 | 泵脉动 |
+| ORM 指示 | 0.2 | 0.1 | 0.2 | 几乎实时 |
+| 棒位指示 | 0.3 | 0.0 | 0.0 | 编码器，无噪声 |
+| 辐射剂量仪 | 5.0 | 2.0 | 0.1 | 统计涨落大 |
+
+### 6.3 仪表故障模式
+
+```js
+type FaultMode = 'STUCK' | 'DRIFT' | 'PEGGED' | 'JITTER' | 'REVERSE' | 'DEAD';
+
+function applyFault(fault, trueValue, displayed, simTime) {
+  switch (fault.mode) {
+    case 'STUCK':   return displayed;                                    // 冻结在故障时刻的值
+    case 'DRIFT':   const elapsed = (simTime - fault.startTime) / 60;    // min
+                    return trueValue + elapsed * fault.driftRate;
+    case 'PEGGED':  return RANGE_MAX;                                    // 满刻度
+    case 'JITTER':  return trueValue + fault.jitterAmplitude * (Math.random() * 2 - 1);
+    case 'REVERSE': return RANGE_MAX - trueValue;
+    case 'DEAD':    return 0;
+  }
+}
+```
+
+### 6.4 故障触发条件
+
+| 故障 | 触发条件 | 受影响仪表 | 持续时间 |
+|------|----------|-----------|----------|
+| STUCK | 超压 > 8 MPa 持续 10s | 压力变送器 | 永久（直到修复） |
+| DRIFT | 温度 > 350°C | 温度仪表 | 30-120s |
+| PEGGED | 真实值 > 量程上限 | 任何 | 直到真实值回量程 |
+| JITTER | 功率变化 > 50%/min | 功率表、周期表 | 5-30s |
+| REVERSE | 难度 4 专属，随机 | 随机一个 | 60s |
+| DEAD | 厂用电丧失 | 所有电子仪表 | 直到恢复供电 |
+
+### 6.5 冗余
+
+| 参数 | 仪表数 | 位置 |
+|------|--------|------|
+| 热功率 | 3（主 + 备用 + 自记笔） | 区域 1 + 区域 3 |
+| 分离器压力 | 2 | 区域 1 |
+| 给水流量 | 4（每泵 1 个） | 区域 2 |
+| ORM | 1（无冗余） | 区域 1 |
+
+## 7 衰变热模型
+
+### 7.1 Way-Wigner 近似
+
+```
+P_decay(t) = P_pre_scram × [0.066 × t^(-0.2) + 0.007 × t^(-0.8)]
+t = simTime - scram_time      // 停堆后经过时间，s
+P_pre_scram = pre_scram_power // 停堆前稳态功率，MW
+上限：P_decay ≤ 0.07 × P_pre_scram（停堆瞬间最大 7%）
+```
+
+### 7.2 实现
+
+```js
+function updateDecayHeat(state, dt) {
+  if (state.scram_time === null) { state.decay_heat_power = 0; return; }
+  const t = state.simTime - state.scram_time;
+  if (t <= 0) { state.decay_heat_power = state.pre_scram_power * 0.07; return; }
+  const fraction = 0.066 * Math.pow(t, -0.2) + 0.007 * Math.pow(t, -0.8);
+  state.decay_heat_power = state.pre_scram_power * Math.min(fraction, 0.07);
+}
+```
+
+### 7.3 与 v1.0 热工水力的耦合
+
+在 v1.0 的 `computeThermalHydraulics()` 中，热源项修改为：
+
+```js
+Q_total = P_fission + decay_heat_power;   // P_fission 来自 PRKE（v1.0 不变），decay_heat_power 是新增项
+```
+
+即：停堆后 P_fission → 0，但 Q_total ≠ 0。冷却系统仍需带走衰变热。
+
+### 7.4 典型数值
+
+| 停堆后 | 占比 | 3200 MW 对应 |
+|--------|------|--------------|
+| 1 s | 7.0% | 224 MW |
+| 10 s | 5.5% | 176 MW |
+| 1 min | 4.2% | 134 MW |
+| 5 min | 3.0% | 96 MW |
+| 30 min | 1.8% | 58 MW |
+| 1 h | 1.4% | 45 MW |
+| 24 h | 0.4% | 13 MW |
+
+### 7.5 停堆触发
+
+```js
+function triggerScram(state) {
+  state.scram_time = state.simTime;
+  state.pre_scram_power = state.P_thermal;
+  scramAZ5(state);  // v1.0 的 scramAZ5() 照常执行（棒全插）
+}
+```
+
+## 8 反应堆周期
+
+### 8.1 定义
+
+```
+T = P_thermal / (dP_thermal/dt)
+T > 0：功率在升；T < 0：功率在降；T = ∞：功率不变；|T| 越小：变化越快
+```
+
+### 8.2 计算
+
+```js
+function updatePeriod(state, dt) {
+  const dP = state.P_thermal - state.prev_P_thermal;
+  state.dP_dt = dP / dt;
+  if (Math.abs(state.dP_dt) < 1e-6) {
+    state.reactor_period = Infinity;
+  } else {
+    state.reactor_period = state.P_thermal / state.dP_dt;
+  }
+  state.prev_P_thermal = state.P_thermal;
+}
+```
+
+### 8.3 保护逻辑
+
+| 周期 | 状态 | 动作 |
+|------|------|------|
+| T > 80s | 正常 | 无 |
+| 20s < T ≤ 80s | 警告 | 报警灯亮（П2），铃响 |
+| 5s < T ≤ 20s | 危险 | 自动保护应触发（如果未旁路） |
+| T ≤ 5s | 紧急 | 强制 AZ-5（除非所有保护被旁路） |
+| T < 0 且 |T| < 10s | 快速降功率 | 报警 |
+
+### 8.4 与 v1.0 保护系统的关系
+
+v1.0 的 `checkAccidentConditions()` 中已有周期保护（П2）。本章节不修改该逻辑，只增加：周期作为仪表读数（周期表显示）、周期作为报警触发源（报警灯状态机）、周期作为玩家决策参考（"我还有多少时间"）。
+
+> 注：v1.0 已有字段 `period`（PRKE 计算）。v2.0 新增的 `reactor_period` 为同一物理量的独立读数/报警来源，二者同源但用途不同（v1 `period` 用于 PRKE 稳态判断，v2 `reactor_period` 用于仪表显示与报警状态机）。
+
+## 9 空间效应——四象限模型
+
+### 9.1 物理背景
+
+RBMK 堆芯直径 12m，高 7m。氙中毒不是均匀的：局部功率高的区域氙消耗快，局部功率低的区域氙积累。这导致"空间氙振荡"——左半堆中毒了，右半堆还在跑。
+
+### 9.2 象限划分
+
+```
+    ┌───────┬───────┐
+    │  Q1   │  Q2   │
+    │(左前) │(右前) │
+    ├───────┼───────┤
+    │  Q3   │  Q4   │
+    │(左后) │(右后) │
+    └───────┴───────┘
+```
+
+每个象限包含 ~53 根燃料通道和 ~53 根控制棒通道。
+
+### 9.3 象限动力学
+
+```js
+interface QuadrantState {
+  power: number;          // 象限功率，MW（四象限之和 = P_thermal）
+  xenon: number;          // 象限氙浓度（相对平衡值）
+  rod_insertion: number;  // 象限平均棒插入深度，0-1
+  void_fraction: number;  // 象限空泡份额
+}
+
+// 加权分配：w[i] = exp(local_reactivity[i] / β_eff) / Σⱼ exp(local_reactivity[j] / β_eff)
+local_reactivity[i] = -xenon[i] × xenon_worth
+                      + rod_insertion[i] × rod_worth_per_quadrant
+                      + void_fraction[i] × void_worth_per_quadrant;
+P_quadrant[i] = P_thermal × w[i];
+```
+
+### 9.4 象限氙动力学
+
+每个象限独立跑 v1.0 的氙方程（用象限功率代替总功率）：
+
+```
+d(Xe[i])/dt = γ_Xe × Σ_f × P_quadrant[i] / P_nominal
+              + λ_I × I[i] - λ_Xe × Xe[i] - σ_a_Xe × φ[i] × Xe[i]
+```
+
+### 9.5 象限仪表
+
+玩家只能看到 4 个象限的局部功率读数（区域 1 的 4 个小表），各 ±5% 精度。不显示象限氙浓度、象限空泡份额、象限棒效。
+
+### 9.6 空间振荡场景
+
+- 初始：四象限功率均匀，各 800 MW
+- 玩家拔 Q1 的棒 → Q1 功率升 → Q1 氙消耗加快 → Q1 反应性进一步升
+- 同时：Q3 功率相对降 → Q3 氙积累 → Q3 反应性降
+- 结果：Q1 = 1000 MW, Q3 = 600 MW（不对称）
+- 如果玩家继续拔 Q1 → 可能触发局部功率超限
+
+### 9.7 与 v1.0 的耦合
+
+| v1.0 模型 | 耦合方式 |
+|-----------|----------|
+| PRKE（§2） | 总功率仍由 PRKE 计算。象限模型只分配功率，不改变总功率 |
+| 氙动力学（§3） | 总氙仍由 v1.0 计算。象限氙是附加的局部分布 |
+| 空泡效应（§4） | 总空泡仍由 v1.0 计算。象限空泡是附加的局部分布 |
+| 棒价值（§5） | 每根棒的价值不变。但拔某象限的棒只影响该象限权重 |
+
+### 9.8 启用条件
+
+```js
+if (simTime > 3600 && P_thermal < 0.5 * P_nominal) {
+  enableQuadrantModel = true;  // 低功率运行 > 1 小时后，空间效应开始显著
+}
+```
+
+## 10 辐射模型
+
+### 10.1 冷却剂活度
+
+```
+d(coolant_activity)/dt = source - decay - removal
+source  = (1.0 - clad_integrity) × 1e8 × (P_thermal / P_nominal)  // Bq/(m³·s)
+decay   = coolant_activity × λ_N16                                  // N-16 衰变，λ = 0.097 s⁻¹
+removal = coolant_activity × (cleanup_flow / total_flow)            // 净化系统
+```
+
+### 10.2 主控室剂量率
+
+```
+containment_dose_rate = base_dose
+                        + coolant_activity × leak_factor
+                        + (1.0 - clad_integrity) × fuel_release_factor
+base_dose = 0.1 mR/h        // 本底
+leak_factor = 1e-9          // 冷却剂泄漏到主控室的系数
+fuel_release_factor = 50    // 燃料破损时的释放系数
+```
+
+### 10.3 典型数值
+
+| 工况 | coolant_activity | containment_dose_rate |
+|------|-----------------|----------------------|
+| 正常运行 | 1e3 Bq/m³ | 0.1 mR/h |
+| 包壳微损（integrity=0.9） | 1e5 | 0.5 mR/h |
+| 包壳严重损（integrity=0.5） | 1e7 | 5 mR/h |
+| 堆芯熔毁（integrity=0） | 1e10 | >100 mR/h（打表） |
+| 爆炸后 | 1e12 | >1000 mR/h |
+
+### 10.4 与剂量仪的耦合
+
+剂量仪（ДП-5В）的读数 = `containment_dose_rate` 经过 §6 的仪表动态响应处理。
+
+## 11 主循环升级
+
+### 11.1 主循环增量
+
+v2.0 主循环见"主循环"章节的 `updateV2()`。增量函数调用顺序与 v1.0 的关系见主循环章节注释。
+
+### 11.2 新增事故条件
+
+在 v1.0 的 `checkAccidentConditions()` 中追加（即 `checkAccidentConditionsV2()`）：
+
+```js
+// 包壳大面积破裂
+if (state.clad_integrity < 0.1) {
+  triggerAccident("FUEL_DAMAGE");
+}
+// 汽水分离器干烧
+if (state.separator_level < 0.2 && state.P_thermal > 0.1 * P_nominal) {
+  triggerAccident("SEPARATOR_DRYOUT");
+}
+// 驱动机构过热时功率仍在升
+if (state.rod_drive_overheat && state.reactor_period < 20) {
+  triggerAlarm("CRITICAL_NO_RODS");  // 不能插棒 + 功率在升 = 极度危险
+}
+```
+
+## 12 参数汇总表（v2.0 新增参数）
+
+| 参数 | 符号 | 值 | 单位 | 来源 |
+|------|------|----|------|------|
+| 分离器截面积 | A_sep | 12.0 | m² | 设计文件 |
+| 分离器蒸汽容积 | V_sep | 30 | m³ | 设计文件 |
+| 汽化潜热 | h_fg | 1500 | kJ/kg | 热力学表（6.9 MPa） |
+| 给水时间常数 | τ_feed | 120 | s | 标定 |
+| 热冲击阈值 | — | 150 | — | 标定 |
+| 严重热冲击阈值 | — | 300 | — | 标定 |
+| 同时运动棒上限 | — | 40 | 根 | 设计文件 |
+| 驱动过热阈值 | — | 80 | °C | 设计文件 |
+| 驱动恢复阈值 | — | 50 | °C | 设计文件 |
+| 驱动加热率 | — | 0.5 | °C/(s·rod) | 标定 |
+| 驱动冷却时间常数 | — | 300 | s | 标定 |
+| 衰变热系数 1 | — | 0.066 | — | Way-Wigner |
+| 衰变热系数 2 | — | 0.007 | — | Way-Wigner |
+| 衰变热指数 1 | — | -0.2 | — | Way-Wigner |
+| 衰变热指数 2 | — | -0.8 | — | Way-Wigner |
+| N-16 衰变常数 | λ_N16 | 0.097 | s⁻¹ | 核数据 |
+| 本底剂量率 | — | 0.1 | mR/h | 测量 |
+| 象限启用条件 | — | t>3600s 且 P<50% | — | 标定 |
+
+## 13 验证用例（v2.0 新增）
+
+### 13.1 汽水分离器
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| 稳态 | P=3200MW, feedwater=steam | 水位不变 |
+| 给水突降 50% | feedwater_flow × 0.5 | 水位以 ~0.02 m/s 下降 |
+| 功率突降 | P: 3200→1600 | steam_flow 减半，水位上升 |
+| 水位 < 0.5 | — | 泵流量上限降低 |
+| 水位 < 0.3 | — | 泵气蚀，流量波动 ±30% |
+
+### 13.2 衰变热
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| 满功率停堆 | P=3200, scram | 停堆后 1s: P_decay=224MW |
+| 停堆后 5min | — | P_decay=96MW |
+| 停堆后泵全停 | pump_flow=0 | 温度持续上升（衰变热无法带走） |
+
+### 13.3 控制棒限制
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| 同时命令 50 根棒 | 50 commands | 40 根执行，10 根排队 |
+| 连续操作 5 分钟 | 持续动棒 | 驱动温度升到 80°C，闭锁 |
+| AZ-5 | scram | 不受限制，211 根同时落 |
+
+### 13.4 量程
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| P=1%，量程 3（10-120%） | — | 读数 = 0（低于下限） |
+| P=50%，量程 3 | — | 读数 = 50%（正常） |
+| P=130%，量程 3 | — | 读数 = 120%（打表） |
+| 切换量程 | — | 0.8s 内读数 = 0 |
+
+### 13.5 空间效应
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| 均匀初始 | 四象限相同 | 功率均匀分配 |
+| 拔 Q1 棒 | Q1 rod_insertion -0.1 | Q1 功率升，Q3 功率降 |
+| 持续 30min | — | Q1 氙消耗，Q3 氙积累 |
+| 总功率 | — | 不变（PRKE 控制总量） |
+
+## 14 性能预算（v2.0 增量）
+
+| 新增计算 | 每步开销 | 备注 |
+|----------|----------|------|
+| 汽水分离器 | ~10 FLOPs | 一阶 ODE |
+| 给水温度 | ~5 FLOPs | 一阶 ODE |
+| 热冲击 | ~10 FLOPs | 条件判断 |
+| 驱动机构 | ~15 FLOPs | 计数 + 温度 |
+| 量程 | ~5 FLOPs | 查表 |
+| 仪表动态 | ~20 FLOPs × 10 仪表 | 一阶滤波 + 噪声 |
+| 衰变热 | ~5 FLOPs | 幂函数 |
+| 周期 | ~5 FLOPs | 除法 |
+| 象限模型 | ~100 FLOPs × 4 象限 | 条件启用 |
+| 辐射 | ~10 FLOPs | 一阶 ODE |
+
+总计：~500 FLOPs/步。在 60fps 下（dt=16ms）完全可忽略（叠加到 v1.0 的 ~187k flops 上，仍非瓶颈）。
+
+## 15 与现有文档的接口（v2.0）
+
+| 现有文档 | 接口 |
+|----------|------|
+| UI.md | 新增仪表（周期表、象限功率表、水位表）加入 InstrumentData |
+| UI_INTERACTION.md | 新增控件（量程旋钮、КВИТ 按钮）加入区域定义 |
+| GDD.md §11 | 仪表清单扩展 |
+| GDD.md §12 | 保护逻辑扩展（周期保护、水位保护） |
+| GDD.md §16 | 难度等级 4 的仪表故障引用 §6.3 |
+| MENU.md | 沙盒模式新增"象限模型"开关 |
+
+---
+
 ## 与其他系统的接口
 
 ### → 音频系统
@@ -874,3 +1607,4 @@ interface InstrumentData {
 |------|------|----------|
 | v1 | 2026-07-30 | 初版 |
 | v2 | 2026-07-30 | Λ: 1ms→0.1ms; 峰值功率: 100×→10×; 吸收体: 4.5m→5.12m; 通道数: 1661→1660; 事故时间线修正; 空泡模型加一阶延迟; 功率倾斜范围调整; 温度系数微调; 泵惰转改为指数衰减; PRKE子步改为10μs |
+| v2.0 | 2026-08-02 | 升级版：新增汽水分离器模型(§2)、给水温度动态(§3)、热冲击(§3.3)、控制棒驱动限制(§4)、中子探测器量程(§5)、仪表动态响应(§6)、衰变热(§7)、反应堆周期(§8)、空间四象限模型(§9)、辐射模型(§10)、主循环升级(§11)、新增参数汇总(§12)、新增验证用例(§13)、性能预算(§14)、与现有文档接口(§15)。升级原则：不修改 v1.0 方程与参数，只增不改；新增状态量带默认值保证向后兼容。

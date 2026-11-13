@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>РБМК-1000 · БЛОК №4 — 控制室仿真器</title>
+<link rel="icon" href="../hdz.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=PT+Mono&family=Marck+Script&family=Oswald:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -20,6 +21,52 @@
     <span class="sign-ru">ЧЕРНОБЫЛЬСКАЯ АЭС ИМ. В.И. ЛЕНИНА</span>
     <span class="sign-cn">切尔诺贝利核电站 · 4号机组 · РБМК-1000</span>
   </header>
+
+  <div id="story-hud" class="hidden">
+    <div id="story-act"><span class="ru" id="story-act-ru">АКТ I</span><span class="cn" id="story-act-cn">第一幕</span></div>
+    <div id="story-obj"></div>
+  </div>
+  <button id="story-cal-toggle" class="hidden" title="拿出 / 收起日历 · 可在日历上涂画标记">
+    <span class="ru">КАЛЕНДАРЬ</span><span class="cn">📅 日历</span>
+  </button>
+  <div id="story-cal" class="hidden">
+    <div class="cal-tools hidden">
+      <i>✏️ 标记</i>
+      <button class="cal-tool" data-tool="pen" title="钢笔（细线）">🖊 钢笔</button>
+      <button class="cal-tool" data-tool="pencil" title="铅笔（粗线）">✏️ 铅笔</button>
+      <button class="cal-tool" data-tool="eraser" title="橡皮擦（小面积擦除）">🧽 橡皮</button>
+      <button class="cal-pen" data-color="#c0392b" title="红笔">●</button>
+      <button class="cal-pen active" data-color="#1a4a9a" title="蓝笔">●</button>
+      <button class="cal-pen" data-color="#2c2c26" title="黑笔">●</button>
+      <button class="cal-clear" title="清除全部标记">✕ 擦掉</button>
+    </div>
+    <canvas id="cal-canvas"></canvas>
+  </div>
+
+  <div id="endless-hud" class="hidden">
+    <div id="endless-date"><span class="ru" id="endless-date-ru">МЕСЯЦ 1</span><span class="cn" id="endless-date-cn">第1月 · 第1天 · 班次 1</span></div>
+    <div id="endless-cash">₽8 000 000</div>
+    <div id="endless-fuel">ВЫГОР. 燃耗 0.0</div>
+    <div id="endless-speed">
+      <button data-ts="1">×1</button>
+      <button data-ts="4">×4</button>
+      <button data-ts="10" class="active">×10</button>
+      <button data-ts="60">×60</button>
+      <button data-ts="240">×240</button>
+    </div>
+    <div id="endless-actions">
+      <button data-panel="save">存档</button>
+      <button data-panel="crew">班组</button>
+      <button data-panel="goals">目标</button>
+      <button data-panel="ach">成就</button>
+    </div>
+  </div>
+
+  <div id="challenge-hud" class="hidden">
+    <div id="challenge-time"><span class="ru">ВРЕМЯ</span><b id="challenge-time-val">15:00</b></div>
+    <div id="challenge-score"><span class="ru">ОЧКИ</span><b id="challenge-score-val">0</b></div>
+    <div id="challenge-msg"><span class="cn" id="challenge-msg-cn">保持功率在目标附近 · 应对突发故障</span></div>
+  </div>
 
   <div id="wall-clock">
     <canvas id="clock-canvas" width="120" height="120"></canvas>
@@ -52,6 +99,7 @@
         <div class="lamp-unit" data-lamp="P5"><div class="lamp"></div><span>П5</span><i>破损</i></div>
         <div class="lamp-unit az-lamp" data-lamp="AZ"><div class="lamp"></div><span>АЗ</span><i>动作</i></div>
       </div>
+    </section>
     </section>
 
     <section class="panel" id="panel-core">
@@ -106,6 +154,9 @@
             <span class="az-face">АЗ-5</span>
           </button>
         </div>
+        <div class="az-cover-state" id="az-cover-state">
+          <span class="ru">КОЛПАК ЗАКРЫТ</span><span class="cn">玻璃罩扣下 · 点击玻璃打开</span>
+        </div>
         <div class="az-warning-stripes"></div>
         <div class="az-caption"><span class="ru">КНОПКА АЗ-5</span><span class="cn">全部控制棒下插</span></div>
       </div>
@@ -120,6 +171,63 @@
 
   </main>
 
+  <div id="panel-wall-bottom">
+    <section class="panel" id="panel-quadrants">
+      <div class="panel-title">
+        <span class="ru">КВАДРАНТЫ</span><span class="cn">象限功率</span>
+      </div>
+      <canvas id="canvas-quadrants" width="200" height="200"></canvas>
+      <div class="gauge-label"><span class="ru">МОЩНОСТЬ КВАДРАНТОВ</span><span class="cn">象限功率分布</span></div>
+    </section>
+
+    <section class="panel" id="panel-sep">
+      <div class="panel-title">
+        <span class="ru">СЕПАРАТОР</span><span class="cn">汽水分离器</span>
+      </div>
+      <canvas id="canvas-sep-level" width="80" height="160"></canvas>
+      <div class="core-readouts">
+        <div><span class="ru">УРОВЕНЬ ДС</span><span class="cn">分离器水位</span><b id="read-sep-level">1.0</b><i>m</i></div>
+        <div><span class="ru">P ДС</span><span class="cn">分离器压力</span><b id="read-sep-press">6.9</b><i>MPa</i></div>
+        <div id="read-decay-heat" style="margin-top:4px;font-size:10px;color:#8a8474">0</div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-rod-drive">
+      <div class="panel-title">
+        <span class="ru">ПРИВОД СТЕРЖНЕЙ</span><span class="cn">棒驱动机构</span>
+      </div>
+      <canvas id="canvas-rod-drive" width="200" height="80"></canvas>
+    </section>
+
+    <section class="panel" id="panel-recorder">
+      <div class="panel-title">
+        <span class="ru">КСУ-120</span><span class="cn">自记记录仪</span>
+      </div>
+      <canvas id="canvas-recorder" width="200" height="160"></canvas>
+    </section>
+
+    <section class="panel" id="panel-radiation">
+      <div class="panel-title">
+        <span class="ru">РАДИАЦИЯ</span><span class="cn">辐射监测</span>
+      </div>
+      <div class="core-readouts">
+        <div><span class="ru">ДОЗА</span><span class="cn">剂量率</span><b id="read-dose">0.1</b><i>mR/h</i></div>
+        <div><span class="ru">ОБ. ЦЕЛ.</span><span class="cn">包壳</span><b id="read-clad">100</b><i>%</i></div>
+      </div>
+      <div class="lamp-bank" id="lamp-bank-new">
+        <div class="lamp-unit" data-lamp="SEP_LO"><div class="lamp"></div><span>СЕП</span><i>水位低</i></div>
+        <div class="lamp-unit" data-lamp="SEP_HI"><div class="lamp"></div><span>СЕП</span><i>水位高</i></div>
+        <div class="lamp-unit" data-lamp="FW_COLD"><div class="lamp"></div><span>ПИТ</span><i>给水低温</i></div>
+        <div class="lamp-unit" data-lamp="CLAD"><div class="lamp"></div><span>ОБ.</span><i>包壳损伤</i></div>
+        <div class="lamp-unit" data-lamp="PERIOD_W"><div class="lamp"></div><span>ПЕР</span><i>周期警</i></div>
+        <div class="lamp-unit" data-lamp="PERIOD_C"><div class="lamp"></div><span>ПЕР</span><i>周期危</i></div>
+        <div class="lamp-unit" data-lamp="DECAY"><div class="lamp"></div><span>ТЕП</span><i>衰变热</i></div>
+        <div class="lamp-unit" data-lamp="RAD"><div class="lamp"></div><span>РАД</span><i>辐射高</i></div>
+      </div>
+      <button id="btn-kvit" class="kvit-btn" title="КВИТ · 确认报警">КВИТ</button>
+    </section>
+  </div>
+
   <div id="console-desk">
 
     <div class="console-unit">
@@ -128,15 +236,21 @@
         <input type="range" id="slider-target" min="0" max="120" value="62" step="1">
         <div class="slider-scale"><i>0</i><i>30</i><i>60</i><i>90</i><i>120</i></div>
       </div>
-      <div class="setpoint-readout" id="read-target">62 %</div>
+      <div class="setpoint-readout" id="read-target">62 %
+        <input type="number" id="input-target" min="0" max="120" step="1" value="62" inputmode="decimal" title="直接输入目标功率数值 (0–120)">
+      </div>
     </div>
 
     <div class="console-unit">
       <label><span class="ru">СКОРОСТЬ ПОДЪЁМА</span><span class="cn">提棒速率</span></label>
       <div class="rocker" id="rocker-speed">
-        <button data-val="0.1">МЕДЛ.</button>
-        <button data-val="0.4" class="active">РАБОЧ.</button>
-        <button data-val="1.0">БЫСТР.</button>
+        <button data-val="0.1" title="МЕДЛ. · 慢速">МЕДЛ.<i>慢</i></button>
+        <button data-val="0.4" class="active" title="РАБОЧ. · 工作">РАБОЧ.<i>工</i></button>
+        <button data-val="1.0" title="БЫСТР. · 快速">БЫСТР.<i>快</i></button>
+      </div>
+      <div class="rocker" id="rocker-rods">
+        <button id="rod-up" title="ПОДЪЁМ · 提棒 (按住)">ПОДЪЁМ<i>提</i></button>
+        <button id="rod-down" title="ОПУСК · 降棒 (按住)">ОПУСК<i>降</i></button>
       </div>
       <div class="setpoint-readout">0.4 %/с</div>
     </div>
@@ -144,8 +258,8 @@
     <div class="console-unit">
       <label><span class="ru">РЕЖИМ</span><span class="cn">运行模式</span></label>
       <div class="rocker" id="rocker-mode">
-        <button data-val="auto" class="active">АВТО</button>
-        <button data-val="manual">РУЧН.</button>
+        <button data-val="auto" class="active" title="АВТО · 自动调节">АВТО<i>自</i></button>
+        <button data-val="manual" title="РУЧН. · 手动">РУЧН.<i>手</i></button>
       </div>
       <div class="setpoint-readout" id="read-mode">自动</div>
     </div>
@@ -155,6 +269,18 @@
       <div class="pump-bank" id="pump-bank">
       </div>
       <div class="setpoint-readout"><span id="read-pumps">6</span>/8 · <span id="read-flow">100</span>%</div>
+    </div>
+
+    <div class="console-unit">
+      <label><span class="ru">ДИАПАЗОН КИП</span><span class="cn">量程切换</span></label>
+      <div class="rocker" id="rocker-range">
+        <button data-val="0" title="С 源量程">С</button>
+        <button data-val="1" title="П 中间量程">П</button>
+        <button data-val="2" class="active" title="1 功率量程">1</button>
+        <button data-val="3" title="2 功率量程">2</button>
+        <button data-val="4" title="3 功率量程">3</button>
+      </div>
+      <div class="setpoint-readout" id="read-range">2 功率量程</div>
     </div>
 
     <div class="console-unit">
@@ -171,7 +297,10 @@
   </div>
 
   <div id="machine-log">
-    <div class="log-header"><span class="ru">ПЕЧАТЬ СОБЫТИЙ</span><span class="cn">事件记录</span></div>
+    <div class="log-header">
+      <span class="ru">ПЕЧАТЬ СОБЫТИЙ</span><span class="cn">事件记录</span>
+      <button id="log-zoom-btn" class="log-zoom" title="放大查看全部事件记录">⤢ 放大</button>
+    </div>
     <div id="log-strip"></div>
   </div>
 
@@ -189,22 +318,69 @@
       <span class="prop-icon">📟</span><span class="prop-name">剂量计<br><i>ДП-5</i></span>
     </button>
     <button class="prop" data-prop="phone">
-      <span class="prop-icon">☎</span><span class="prop-name">高频电话<br><i>ВЧ</i></span>
+      <span class="prop-icon">📞</span><span class="prop-name">高频电话<br><i>ВЧ</i></span>
+    </button>
+    <button class="prop" data-prop="phonebook">
+      <span class="prop-icon">📒</span><span class="prop-name">电话号码簿<br><i>ТЕЛ.КНИГА</i></span>
     </button>
     <button class="prop" data-prop="coffee">
       <span class="prop-icon">🥃</span><span class="prop-name">茶炊<br><i>ЧАЙ</i></span>
     </button>
     <button class="prop" data-prop="about">
-      <span class="prop-icon">ⓘ</span><span class="prop-name">关于<br><i>О ПРОГРАММЕ</i></span>
+      <span class="prop-icon">ℹ️</span><span class="prop-name">关于<br><i>О ПРОГРАММЕ</i></span>
     </button>
   </div>
 
-  <div id="version-stamp">
+  <div id="version-stamp" title="СБОРКА · 构建 сб.2026.07.30 · РЭ-86/12 修订">
     <span id="stamp-version">v0.1.0</span>
     <span id="stamp-build">сб.2026.07.30</span>
     <span id="stamp-revision">РЭ-86/12</span>
   </div>
 
+</div>
+
+<div id="ending-overlay"></div>
+<div id="meltdown-fx">
+  <div class="mfx-flash"></div>
+  <div class="mfx-fire mfx-fire-1"></div>
+  <div class="mfx-fire mfx-fire-2"></div>
+  <div class="mfx-smoke mfx-smoke-1"></div>
+  <div class="mfx-smoke mfx-smoke-2"></div>
+  <div class="mfx-debris mfx-debris-1"></div>
+  <div class="mfx-debris mfx-debris-2"></div>
+  <div class="mfx-debris mfx-debris-3"></div>
+  <div class="mfx-plant">
+    <div class="mfx-plant-body"></div>
+    <div class="mfx-plant-chimney"></div>
+    <div class="mfx-plant-reactor"></div>
+    <div class="mfx-plant-roof"></div>
+  </div>
+</div>
+
+<div id="log-zoom" class="hidden">
+  <div id="log-zoom-frame">
+    <div class="log-zoom-head">
+      <span class="ru">ПЕЧАТЬ СОБЫТИЙ · ПОЛНЫЙ ЖУРНАЛ</span><span class="cn">事件记录 · 全量</span>
+      <button id="log-zoom-close">✕</button>
+    </div>
+    <div id="log-zoom-body"></div>
+  </div>
+</div>
+
+<div id="ignition-overlay" class="hidden">
+  <div class="ig-core"></div>
+  <div class="ig-ring ig-ring-1"></div>
+  <div class="ig-ring ig-ring-2"></div>
+  <div class="ig-text"><span class="ig-ru">ПУСК</span><span class="ig-cn">点火 · 反应堆临界</span></div>
+</div>
+
+<div id="tutorial-box" class="hidden">
+  <div id="tutorial-ring"></div>
+  <div id="tutorial-text">
+    <div id="tutorial-step">第 1 步 / 8</div>
+    <div id="tutorial-msg"></div>
+  </div>
+  <button id="tutorial-close" title="跳过引导">✕</button>
 </div>
 
 <div id="prop-overlay" class="hidden">
@@ -216,12 +392,22 @@
     <div class="manual-spine" id="manual-spine"></div>
     <div class="manual-pages">
       <div class="manual-page" id="manual-page"></div>
+      <canvas id="manual-canvas"></canvas>
     </div>
     <div class="manual-controls">
       <div class="manual-lang">
         <button data-lang="zh" class="active">中文</button>
         <button data-lang="ru">Рус</button>
+        <button data-lang="en">Eng</button>
         <button data-lang="both">双语</button>
+      </div>
+      <div class="manual-draw-tools">
+        <i>✏️ 涂画</i>
+        <button class="cal-tool" id="manual-draw-toggle" title="开启后在手册页面上涂画标记">涂画模式</button>
+        <button class="cal-tool" data-tool="pen">🖊 钢笔</button>
+        <button class="cal-tool active" data-tool="pencil">✏️ 铅笔</button>
+        <button class="cal-tool" data-tool="eraser">🧽 橡皮</button>
+        <button class="cal-clear" title="清除手册上的涂画">✕ 擦掉</button>
       </div>
       <div class="manual-pager">
         <button id="manual-prev">◀</button>
@@ -236,26 +422,33 @@
 <div id="about-overlay" class="hidden">
   <div id="about-plaque">
     <div id="about-screws"><span></span><span></span><span></span><span></span></div>
-    <div id="about-brand">ТРЕНАЖЁР «ЩИТ»</div>
+    <div id="about-brand">ТРЕНАЖЁР «ЩИТ»<i>主控室训练模拟器</i></div>
     <div id="about-divider"></div>
-    <div class="about-row"><span class="about-label-ru">ВЕРСИЯ</span><span class="about-val" id="about-version">—</span></div>
-    <div class="about-row"><span class="about-label-ru">СБОРКА</span><span class="about-val" id="about-build">—</span></div>
-    <div class="about-row"><span class="about-label-ru">РЕВИЗИЯ</span><span class="about-val" id="about-revision">—</span></div>
+    <div class="about-row"><span class="about-label-ru">ВЕРСИЯ<i>版本</i></span><span class="about-val" id="about-version">—</span></div>
+    <div class="about-row"><span class="about-label-ru">СБОРКА<i>构建</i></span><span class="about-val" id="about-build">—</span></div>
+    <div class="about-row"><span class="about-label-ru">РЕВИЗИЯ<i>修订</i></span><span class="about-val" id="about-revision">—</span></div>
     <div id="about-divider"></div>
-    <div class="about-row"><span class="about-label-ru">РАЗРАБОТКА</span><span class="about-val" id="about-author">—</span></div>
-    <div class="about-row"><span class="about-label-ru">ПЛАТФОРМА</span><span class="about-val" id="about-platform">—</span></div>
+    <div class="about-row"><span class="about-label-ru">РАЗРАБОТКА<i>开发</i></span><span class="about-val" id="about-author">—</span></div>
+    <div class="about-row"><span class="about-label-ru">ПЛАТФОРМА<i>平台</i></span><span class="about-val" id="about-platform">—</span></div>
     <div id="about-divider"></div>
     <div class="about-row" id="about-notes"></div>
     <div id="about-close"><button id="btn-about-close">✕</button></div>
   </div>
 </div>
 
-<script src="js/engine.js"></script>
-<script src="js/render.js"></script>
-<script src="js/props.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/boot.js"></script>
-<script src="js/menu.js"></script>
-<script src="js/app.js"></script>
+<script src="js/engine.js?v=20260801y"></script>
+<script src="js/render.js?v=20260801y"></script>
+<script src="js/props.js?v=20260801y"></script>
+<script src="js/audio.js?v=20260801y"></script>
+<script src="js/boot.js?v=20260801y"></script>
+<script src="js/menu.js?v=20260801y"></script>
+<script src="js/pause.js?v=20260801y"></script>
+<script src="js/debrief.js?v=20260801y"></script>
+<script src="js/scenario.js?v=20260801y"></script>
+<script src="js/endless.js?v=20260801y"></script>
+<script src="js/tutorial.js?v=20260801y"></script>
+<script src="js/challenge.js?v=20260801y"></script>
+<script src="js/app.js?v=20260801y"></script>
+<script type="module" src="js/bridge.js?v=20260801y"></script>
 </body>
 </html>

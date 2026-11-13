@@ -64,6 +64,7 @@ rbmk-simulator/
 │   ├── SAVE.md            # 存档系统设计
 │   ├── UI_INTERACTION.md  # 交互设计（БЩУ 6 区）
 │   ├── REACTOR_SIM.md     # 物理模型 v2
+│   ├── ENDLESS_MODE.md    # 无尽模式设计（运营模拟）
 │   ├── LOG_TEMPLATE.md    # 值班日志模板
 │   └── dev/AUDIO_IMPL.md  # 音频引擎实现
 ├── tests/                 # 测试套件
