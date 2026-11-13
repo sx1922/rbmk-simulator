@@ -4,10 +4,12 @@
 
 local Layout = require('src.ui.layout')
 local Theme = require('src.ui.theme')
+local W = require('src.ui.widgets')
 local Engine = require('src.engine')
 local Instrument = require('src.instrument')
 local Journal = require('src.journal')
 local Scoring = require('src.scoring')
+local Props = require('src.props')
 
 local Hud = require('src.ui.hud')
 local Menu = require('src.menu')
@@ -347,6 +349,7 @@ function App.backToMenu()
   Hud.clearStoryHud()
   Hud.hideEndlessHud()
   Hud.closeEndlessPanel()
+  Props.closeProp()
   App.endlessPanelLock = false
   App.state = 'MENU'
   Menu.show(function(m) App.startGame(m) end)
@@ -385,6 +388,7 @@ function App.startGame(m)
   end
 
   Hud.reset()
+  Props.resetTea()
   App.hideFloat()
 
   if App.mode == 'story' then
@@ -435,7 +439,10 @@ function App.startGame(m)
     if App.mode == 'story' then
       local okT, Tutorial = pcall(require, 'src.tutorial')
       if okT and Tutorial.start then
-        Tutorial.start({ getState = function() return Engine.S end })
+        Tutorial.start({
+          getState = function() return Engine.S end,
+          propOpen = function() return Props.isOpen() end,
+        })
       end
     end
   end)
@@ -517,6 +524,11 @@ function App.update(dt)
   Instrument.updateTimer(dt)
   updateFloat(dt)
 
+  do
+    local okA, Audio = pcall(require, 'src.audio.synth')
+    if okA and Audio.update then Audio.update(dt) end
+  end
+
   -- 教程推进
   if App.state == 'PLAYING' and not App.paused then
     local okT, Tutorial = pcall(require, 'src.tutorial')
@@ -580,13 +592,24 @@ function App.draw()
   if App.state == 'MENU' then
     Menu.draw()
   elseif App.state == 'PLAYING' or App.state == 'ENDING' then
-    Hud.draw(App)
+    -- 模态道具打开时抑制 HUD 即时点击（对齐 web 弹层遮罩）
+    local blocked = Props.isOpen() ~= nil
+    if blocked then
+      local kp, kd, kr = W.mouse.pressed, W.mouse.down, W.mouse.released
+      W.mouse.pressed, W.mouse.down, W.mouse.released = false, false, false
+      Hud.draw(App)
+      W.mouse.pressed, W.mouse.down, W.mouse.released = kp, kd, kr
+    else
+      Hud.draw(App)
+    end
+    Props.draw(App)
     local okT, Tutorial = pcall(require, 'src.tutorial')
     if okT and Tutorial.isActive() then Tutorial.draw() end
   elseif App.state == 'DEBRIEF' then
     Hud.draw(App)
     Debrief.draw()
   end
+  W.endFrame()
 
   -- 终局过渡（覆盖一切）
   if App.endingFx then
@@ -677,6 +700,11 @@ function App.keypressed(key, scancode, isRepeat)
     end
   end
   if key == 'escape' then
+    -- 道具优先关闭（对齐 web：Esc 关道具；无道具时开暂停）
+    if Props.isOpen() then
+      Props.closeProp()
+      return
+    end
     App.openPause()
   elseif key == 'f12' then
     App.openEndConfirm()
@@ -739,6 +767,7 @@ function App.resize() end
 function App.boot()
   Layout.calc(love.graphics.getWidth(), love.graphics.getHeight())
   Theme.loadFonts(Layout.scale)
+  Props.setApp(App)
   Hud.setPanelCallbacks(
     function()  -- 面板打开：暂停 + 锁定（对齐 web showEndlessPanel）
       App.paused = true

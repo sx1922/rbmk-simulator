@@ -12,11 +12,11 @@ local ctx = nil
 local advancing = false
 
 local STEPS = {
-  { msg = '从运行规程手册开始。\n它收录了机组参数、操作规程和保护定值。\n值班时遇到拿不准的地方，翻它。\n· Начните с регламента — в нём все нормы и режимы.\n\n① 以后点击桌面道具打开 → ② 阅读 → ③ 按 ✕ 放回或 Esc 关闭。' },
-  { msg = '这是值班日志。每班开始和结束都要记录机组状态、功率和交接事项。\n换班时上级会来抽查，填写不完整会被记过。\n· Журнал вахты — плановые записи обязательны.' },
-  { msg = '计算器（МК-61）用来快速核算功率裕度、控制棒余量等参数。\n需要精确计算时拿出来用，避免心算出错。\n· МК-61 — для точных расчётов запаса реактивности.' },
-  { msg = '剂量计（ДП-5В）测量控制室与堆芯附近的辐射水平。\n读数升高说明屏障出现问题。听它的咔哒声——越密越危险。\n· ДП-5В: стук счётчика чаще — радиация выше.' },
-  { msg = '高频电话（ВЧ）直通调度台。\n拿起听筒，拨个号，按「拨号」呼叫调度。\n号码可以在桌上的「电话号码簿」里查阅。\n剧情中上级的指示会经由它传来，务必应答。\n· ВЧ — связь с диспетчером. Отвечайте всегда.' },
+  { openProp = 'manual', msg = '从运行规程手册开始。\n它收录了机组参数、操作规程和保护定值。\n值班时遇到拿不准的地方，翻它。\n· Начните с регламента — в нём все нормы и режимы.\n\n① 点击底部「📘 规程」打开 → ② 阅读 → ③ 点「✕ 放回」或按 Esc 关闭。' },
+  { openProp = 'clipboard', msg = '这是值班日志。每班开始和结束都要记录机组状态、功率和交接事项。\n换班时上级会来抽查，填写不完整会被记过。\n· Журнал вахты — плановые записи обязательны.\n\n① 打开「📋 日志」→ ② 查看 → ③ 按 ✕ 放回关闭。' },
+  { openProp = 'calculator', msg = '计算器（МК-61）用来快速核算功率裕度、控制棒余量等参数。\n需要精确计算时拿出来用，避免心算出错。\n· МК-61 — для точных расчётов запаса реактивности.\n\n① 打开「🔢 МК-61」→ ② 试试 OPR / Xe 键 → ③ 按 ✕ 放回关闭。' },
+  { openProp = 'dosimeter', msg = '剂量计（ДП-5В）测量控制室与堆芯附近的辐射水平。\n读数升高说明屏障出现问题。听它的咔哒声——越密越危险。\n· ДП-5В: стук счётчика чаще — радиация выше.\n\n① 打开「☢ ДП-5В」听声音 → ② 按 ✕ 放回关闭。' },
+  { openProp = 'phone', msg = '高频电话（ВЧ）直通调度台。\n拿起听筒，拨个号，按「拨号」呼叫调度。\n号码可以在桌上的「电话号码簿」里查阅。\n剧情中上级的指示会经由它传来，务必应答。\n· ВЧ — связь с диспетчером. Отвечайте всегда.\n\n① 打开「☎ 电话」拿起听筒拨 0701 → ② 按 ✕ 放回关闭。' },
   { msg = '这是热功率表。\n左侧是功率表盘（% Nном），右侧数字是实际功率（MW）。\n红色区域 = 110% 以上，超过会触发 П1 保护。\n· Это прибор тепловой мощности.' },
   { msg = '这是周期表。\n周期 = 功率变化的速度。指针在中央 = 功率稳定。\n偏右 = 功率在升，偏左 = 功率在降。\n当指针进入红色区域（T < 10s）时，必须立即停堆。\n· Период — скорость изменения мощности.' },
   { msg = '这是操作反应性裕度（ОЗР / OPR）。\n它表示还有多少控制棒可以插入。\n安全规程要求 OPR ≥ 26 根。低于 15 红色警告，低于 8 必须停堆。\n· ОЗР — запас реактивности.' },
@@ -62,7 +62,16 @@ function Tutorial.update(dt)
   if idx < 0 then return end
   local s = current()
   if not s then return end
-  if s.cond and ctx and ctx.getState then
+  if s.openProp and ctx and ctx.propOpen then
+    -- 道具步骤：打开→（阅读）→关闭 后推进
+    local opened = ctx.propOpen() == s.openProp
+    if opened then
+      s._opened = true
+    elseif s._opened then
+      s._opened = nil
+      advance()
+    end
+  elseif s.cond and ctx and ctx.getState then
     if s.cond(ctx.getState()) then advance() end
   end
   advancing = false
@@ -71,7 +80,7 @@ end
 function Tutorial.keypressed(key)
   if idx < 0 then return end
   local s = current()
-  if not s or s.cond then return end
+  if not s or s.cond or s.openProp then return end
   if key == 'return' or key == 'kpenter' or key == 'space' then
     advance()
   end

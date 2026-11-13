@@ -863,8 +863,7 @@ function Hud.draw(App)
     drawEndlessPanel()
   end
 
-  -- 帧尾：清 pressed/released 边沿
-  W.endFrame()
+  -- 帧尾边沿清理由 App.draw 统一执行（道具层共享同一帧）
 end
 
 function Hud.beginFrame(App)
