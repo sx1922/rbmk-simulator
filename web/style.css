@@ -2893,7 +2893,7 @@ input[type=range]::-webkit-slider-thumb:active { cursor: grabbing; }
   color: #8A8E7C;
 }
 
-/* ============== PAUSE OVERLAY (FLOW-01 9) ============== */
+/* ============== PAUSE OVERLAY ============== */
 
 #pause-overlay {
   position: fixed;
@@ -2981,7 +2981,7 @@ input[type=range]::-webkit-slider-thumb:active { cursor: grabbing; }
   color: #5A5E52;
 }
 
-/* ============== ENDING TRANSITION (FLOW-01 5) ============== */
+/* ============== ENDING TRANSITION ============== */
 
 #ending-overlay {
   position: fixed;
@@ -3011,7 +3011,7 @@ input[type=range]::-webkit-slider-thumb:active { cursor: grabbing; }
   100% { background: #000; }
 }
 
-/* ============== DEBRIEF OVERLAY (DEBRIEF-01 2) ============== */
+/* ============== DEBRIEF OVERLAY ============== */
 
 #debrief-overlay {
   position: fixed;

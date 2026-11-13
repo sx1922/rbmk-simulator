@@ -117,7 +117,7 @@ dC_i/dt = (beta_i/Lambda) * n - lambda_i * C_i
 | 评分系统 | ✅ 完成 | 5 维度，苏联评级，报告生成 |
 | 存档系统 | ✅ 完成 | Вахтенный журнал，导入/导出/校验/恢复 |
 | 场景内容 | ❌ 未接入 | 场景脚本已定义但未接入游戏循环 |
-| LÖVE 端口 | ✅ v0.2.4 全量对齐 Web | love-version 分支 · 52 项 headless 测试 |
+| LÖVE 端口 | ✅ v0.2.4 完成 | love-version 分支 · 52 项 headless 测试 |
 
 ## 测试
 
@@ -187,7 +187,7 @@ version.json   — Single source of truth
 | Scoring | ✅ Done | 5 dimensions, Soviet ratings, report generation |
 | Save | ✅ Done | Vakhtennyy Zhurnal, import/export/backup |
 | Scenario Content | ❌ Not integrated | Scripts defined but not wired into game loop |
-| LÖVE Port | ✅ v0.2.4 aligned with Web | love-version branch · 52 headless tests |
+| LÖVE Port | ✅ v0.2.4 done | love-version branch · 52 headless tests |
 
 ---
 
@@ -223,7 +223,7 @@ bash serve.sh
 | Оценка | ✅ Готово | 5 измерений, советские рейтинги, рапорт |
 | Сохранение | ✅ Готово | Вахтенный журнал, экспорт/импорт/бэкап |
 | Контент сценариев | ❌ Не интегрирован | Сценарии описаны, но не подключены |
-| LÖVE | ✅ v0.2.4 — полный паритет с Web | ветка love-version · 52 headless-тестов |
+| LÖVE | ✅ v0.2.4 | ветка love-version · 52 headless-тестов |
 
 ## Сценарии
 
