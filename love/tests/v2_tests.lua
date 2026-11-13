@@ -401,3 +401,145 @@ addTest('instrument: 灯驱动条件映射', function()
   assertEq(Instrument.lampState('RAD'), 'FAST_BLINK', '辐射升高应报警')
   Instrument.initLamps()
 end)
+
+-- ==================== scenario 场景引擎 ====================
+
+local Scenario = require('src.scenario')
+
+-- 场景时间助手（与 scenario.lua 相同公式）
+local function t(h, m, day)
+  if day == nil then day = h < 8 and 1 or 0 end
+  return (((day * 24 + h) - 8) * 3600 + m * 60) * 1000
+end
+
+local function fakeState(over)
+  local st = {
+    power = 3200, n = 1.0, azFired = false, orm = 25, xenon = 0.4,
+    voidFraction = 20, rodPositions = 47.5, fuelTemp = 280,
+    meltdown = false, t = 0,
+  }
+  for k, v in pairs(over or {}) do st[k] = v end
+  return st
+end
+
+addTest('scenario: 创建 + 事件按优先级排序', function()
+  local sc = Scenario.create('chronicle_04')
+  assertTrue(sc ~= nil, '场景应存在')
+  assertEq(sc.id, 'chronicle_04')
+  local ok = true
+  for i = 2, #sc.events do
+    local pa = sc.events[i - 1].priority or 0
+    local pb = sc.events[i].priority or 0
+    if pa > pb then ok = false end
+  end
+  assertTrue(ok, 'events 应按 priority 升序')
+  assertEq(sc.flags.act, 1, '初始 act')
+end)
+
+addTest('scenario: 第一幕开场事件链', function()
+  local sc = Scenario.create('chronicle_04')
+  local gotTs, gotObj, logs = nil, nil, 0
+  sc:on('timescale', function(a) gotTs = a.value end)
+  sc:on('objective', function(a) gotObj = a.text end)
+  sc:on('log', function() logs = logs + 1 end)
+  sc:update(1, fakeState())
+  assertEq(gotTs, 60, 'a1_start 应切 ×60')
+  assertTrue(gotObj and gotObj:find('接班检查', 1, true), '应下发接班目标')
+  assertTrue(logs >= 3, '应有开场日志')
+  assertEq(sc.flags.act, 1)
+end)
+
+addTest('scenario: a1_end 时间跳跃到 23:10', function()
+  local sc = Scenario.create('chronicle_04')
+  local jumped = 0
+  sc:on('timeskip', function(a) jumped = a.to end)
+  sc:update(t(14, 0) + 1, fakeState())
+  -- a1_end (time t(14,0)) 应在 a1_* 系列之后触发
+  assertTrue(jumped > 0, '应收到 timeskip')
+  assertEq(sc.simTime, t(23, 10), '场景时钟应跳到 23:10')
+  assertEq(sc.flags.act, 2, '进入第二幕')
+end)
+
+addTest('scenario: 氙坑事件 + 保护关闭 + 覆盖注入', function()
+  local sc = Scenario.create('chronicle_04')
+  sc.simTime = t(0, 0) - 1000
+  local gotMode, overrideN = nil, 0
+  sc:on('mode', function(a) gotMode = a.value end)
+  sc:on('log', function() end)
+  sc:update(2000, fakeState())
+  assertEq(Engine.S.protections.P2, false, 'a2_crash 应关闭 П2')
+  assertEq(gotMode, 'manual', '应切手动')
+  assertEq(sc.flags.xenon_pit_active, true, '氙坑标志')
+  overrideN = 0
+  for _, o in ipairs(sc.overrides) do overrideN = overrideN + 1 end
+  assertTrue(overrideN >= 2, '应有 power+rod 两条覆盖')
+  -- 恢复保护状态
+  Engine.S.protections.P2 = true
+end)
+
+addTest('scenario: 分支决策 — 按 AZ-5 走停堆线', function()
+  local sc = Scenario.create('chronicle_04')
+  sc.simTime = t(0, 0)
+  sc:update(1, fakeState())
+  assertTrue(sc.activeBranch ~= nil, 'a2_branch 应武装分支')
+  sc:onPlayerAction('az_pressed')
+  assertEq(#sc.decisions, 1, '应记录决策')
+  assertEq(sc.decisions[1].id, 'xenon_pit')
+  assertEq(sc.decisions[1].choice, 'shutdown')
+  assertEq(sc.flags.branch_xenon_pit, 'shutdown')
+  -- a2_shutdown 触发
+  sc:update(1, fakeState())
+  assertEq(sc.flags.voluntary_shutdown, true, '自愿停堆标志')
+  assertEq(sc.flags.act, '2B', '进入 2B')
+  assertEq(sc.simTime, t(8, 0, 1), '跳跃到次日 08:00')
+end)
+
+addTest('scenario: 分支超时走默认 continue 线', function()
+  local sc = Scenario.create('chronicle_04')
+  sc.simTime = t(0, 0)
+  sc:update(1, fakeState())
+  sc:update(1800001, fakeState())  -- 超过 timeout 1800000
+  assertEq(sc.flags.branch_xenon_pit, 'continue', '默认继续')
+  sc:update(1, fakeState())  -- 下一帧事件循环才消费 a2_continue
+  assertEq(sc.flags.act, 3, '进入第三幕')
+end)
+
+addTest('scenario: 停堆线走通到安全结局', function()
+  local sc = Scenario.create('chronicle_04')
+  sc.simTime = t(0, 0)
+  sc:update(1, fakeState())
+  sc:onPlayerAction('az_pressed')
+  sc:update(1, fakeState())
+  -- a3b_start (t(8,0,1)) 与 a3b_test (t(14,0,1))；endgame 处理与 app 层一致
+  local endType = nil
+  sc:on('endgame', function(a)
+    endType = a.endType
+    sc:finish(a.endType, a.epilogue)
+  end)
+  sc:update(t(14, 0, 1) - sc.simTime + 1, fakeState())
+  assertEq(endType, 'SAFE_SHUTDOWN', '停堆线应安全结局')
+  assertTrue(sc:isFinished(), '场景应结束')
+  assertEq(sc.endResult.epilogue, 'epilogue_quiet')
+end)
+
+addTest('scenario: sim_override 功率拉向目标', function()
+  local sc = Scenario.create('chronicle_04')
+  sc:execAction({ type = 'sim_override', target = 'power', value = 30, ramp = 1000 })
+  local S = { n = 1.0, rodTarget = 50, rodHeld = 0 }
+  for _ = 1, 100 do
+    sc:applyOverrides(100, S)
+  end
+  assertNear(S.n, 30 / Engine.N_NOM, 0.01, '功率应被拉向 30 МВт')
+end)
+
+addTest('scenario: 熔毁早期直接结局', function()
+  local sc = Scenario.create('chronicle_04')
+  local endType = nil
+  sc:on('endgame', function(a)
+    endType = a.endType
+    sc:finish(a.endType, a.epilogue)
+  end)
+  sc:update(1, fakeState({ meltdown = true, t = 3600 }))  -- 白班熔毁
+  assertEq(endType, 'EXPLOSION', '白班熔毁应直接爆炸结局')
+  assertTrue(sc:isFinished())
+end)
