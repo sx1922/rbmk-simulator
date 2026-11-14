@@ -2,10 +2,32 @@
 -- 道具：规程手册 / 值班日志 / 计算器 / 剂量计 / 电话 / 号码簿 / 茶炉 / 日历
 -- 旗标联动：喝完茶 → scenario action_tea_drunk；翻到第11页 → discovered_page_47
 
-local Theme = require('src.ui.theme')
 local W = require('src.ui.widgets')
 local Engine = require('src.engine')
 local KvStore = require('src.kvstore')
+local WEB = require('src.ui.webtheme')
+
+-- 米色工业风适配层：道具面板统一为 Web 版纸张/仪表风格（旧深色 Theme 引用重映射）
+local Theme = setmetatable({}, {
+  __index = function(_, k)
+    local map = {
+      panel2 = { 0.949, 0.925, 0.847 },   -- #f2ecd8 纸面
+      panel3 = { 0.902, 0.878, 0.816 },   -- #e6e0d0
+      panel4 = { 0.863, 0.839, 0.773 },   -- #dcd6c5
+      edge = { 0.722, 0.698, 0.627 },     -- #b8b2a0
+      edgeLo = { 0.604, 0.580, 0.518 },   -- #9a9484
+      amber = { 0.690, 0.455, 0.157 },    -- 深琥珀（米色底可读）
+      redDeep = { 0.690, 0.125, 0.063 },  -- #b02010
+      red = { 0.878, 0.204, 0.094 },
+      green = { 0.180, 0.620, 0.267 },
+      cyan = { 0.102, 0.290, 0.604 },     -- 深蓝（原青色在米色底不可读）
+      txt = { 0.110, 0.102, 0.086 },      -- #1c1a16
+      txtDim = { 0.361, 0.341, 0.290 },
+      txtFaint = { 0.541, 0.518, 0.455 },
+    }
+    return map[k]
+  end,
+})
 
 local Props = {}
 

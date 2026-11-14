@@ -257,4 +257,39 @@ function SFX.play(name, volMul)
   end
 end
 
+
+-- ==================== 警铃循环（web 5.4：FAST_BLINK 连续响 / 周期<5s 紧急 / КВИТ 停） ====================
+
+local bellSource, bellUrgent = nil, nil
+
+local function genBell(freq)
+  local sr = 22050
+  local n = sr
+  local sd = love.sound.newSoundData(n, sr, 16, 1)
+  for i = 0, n - 1 do
+    local t = i / sr
+    local gate = (math.floor(t * 4) % 2 == 0) and 1 or 0
+    local ph = (t * freq) % 1
+    sd:setSample(i, (ph < 0.5 and 1 or -1) * gate * 0.12)
+  end
+  return love.audio.newSource(sd)
+end
+
+-- mode: 'off' | 'normal' | 'urgent'
+function SFX.setAlarmBell(mode)
+  if not love.audio then return end
+  if not bellSource then
+    bellSource = genBell(800); bellSource:setLooping(true)
+    bellUrgent = genBell(1200); bellUrgent:setLooping(true)
+  end
+  bellSource:stop()
+  bellUrgent:stop()
+  local v = muted and 0 or masterVolume
+  if mode == 'normal' and v > 0 then
+    bellSource:setVolume(v * 0.5); bellSource:play()
+  elseif mode == 'urgent' and v > 0 then
+    bellUrgent:setVolume(v * 0.6); bellUrgent:play()
+  end
+end
+
 return SFX

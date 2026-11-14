@@ -348,11 +348,27 @@ function App.backToMenu()
   if okT and Tutorial.stop then Tutorial.stop() end
   Hud.clearStoryHud()
   Hud.hideEndlessHud()
+  Hud.hideChallengeHud()
   Hud.closeEndlessPanel()
   Props.closeProp()
   App.endlessPanelLock = false
+  do
+    local okA, Audio = pcall(require, 'src.audio.synth')
+    if okA and Audio.setAlarmBell then Audio.setAlarmBell('off') end
+  end
   App.state = 'MENU'
   Menu.show(function(m) App.startGame(m) end)
+end
+
+-- ==================== 关于铭牌（Web about-overlay 对齐） ====================
+
+function App.showAbout()
+  Hud.showAbout()
+end
+
+function App.closeAbout()
+  local okH, HudMod = pcall(require, 'src.ui.hud')
+  -- aboutOpen 状态由 hud 内部管理（✕ 按钮），此处仅为 API 对齐
 end
 
 -- ==================== 开始值班  ====================
@@ -408,6 +424,7 @@ function App.startGame(m)
     end
   elseif App.mode == 'challenge' then
     App.initChallenge()
+    Hud.showChallengeHud()
     Engine.S.onEvent = function(etype, msg)
       if etype == 'alarm' then App.stats.alarmCount = App.stats.alarmCount + 1 end
       App.logEvent(etype, msg)
@@ -583,6 +600,28 @@ function App.update(dt)
 
   if App.state == 'PLAYING' or App.state == 'ENDING' then
     Instrument.updateLamps(Engine.S)
+    -- 警铃（web 5.4：任一灯 FAST_BLINK → 连续响；周期 < 5s → 紧急 1200Hz 不可确认）
+    if not App.paused then
+      local bell = 'off'
+      local S = Engine.S
+      if S.reactor_period > 0 and S.reactor_period ~= math.huge and S.reactor_period < 5 then
+        bell = 'urgent'
+      else
+        for _, id in ipairs(Instrument.LAMP_IDS) do
+          if Instrument.lampState(id) == 'FAST_BLINK' then bell = 'normal' break end
+        end
+        if bell == 'off' then
+          for _, k in ipairs({ 'P1', 'P2', 'P3', 'P4', 'P5', 'AZ' }) do
+            if S.alarms[k] then bell = 'normal' break end
+          end
+        end
+      end
+      local okA, Audio = pcall(require, 'src.audio.synth')
+      if okA and Audio.setAlarmBell and App._lastBell ~= bell then
+        Audio.setAlarmBell(bell)
+        App._lastBell = bell
+      end
+    end
   end
 end
 

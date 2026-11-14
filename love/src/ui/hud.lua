@@ -41,6 +41,14 @@ end
 
 local function hover(x, y, w, h) return hitbox(x, y, w, h) end
 
+-- 设计坐标 → 屏幕坐标的剪裁（本机 LÖVE 的 scissor API 按屏幕坐标解释，
+-- 在 Layout 变换内直接传设计坐标会整体错位，需手动换算）
+local Layout = require('src.ui.layout')
+local function setScissorD(x, y, w, h)
+  local s = Layout.scale or 1
+  love.graphics.setScissor(x * s + (Layout.ox or 0), y * s + (Layout.oy or 0), w * s, h * s)
+end
+
 local function utf8chars(s)
   local chars = {}
   local i = 1
@@ -312,8 +320,12 @@ local function drawPanelPower()
   local uw = (lb[3] - 30) / 6
   for i, def in ipairs(defs) do
     local x = lb[1] + 15 + (i - 1) * uw
-    lampUnit(x, lb[2], uw - 6, 68, def[1], def[2], def[3], WEB.lampRed, false)
-    addHit(x, lb[2], uw - 6, 68, function() end)
+    local acked = Instrument.lampIsAcked(def[1])
+    local on = def[3] and not acked
+    lampUnit(x, lb[2], uw - 6, 68, def[1], def[2], on, WEB.lampRed, false)
+    addHit(x, lb[2], uw - 6, 68, function()
+      if def[3] then Instrument.lampAck(def[1]) end
+    end)
   end
 end
 
@@ -322,11 +334,12 @@ local function drawPanelCore()
   drawPanelBox(L[1], L[2], L[3], L[4], 'РАЗРЕЗ АКТИВНОЙ ЗОНЫ', '堆芯轴向剖面')
   local c = WEB.L.coreCanvas
   love.graphics.push('all')
-  love.graphics.setScissor(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
+  setScissorD(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
   R2.drawCore(c[1], c[2], c[3], c[4], S)
   love.graphics.pop()
   local ro = {
-    { 'ОЗР', '操作裕度', tostring(S.opr), 'ст.', S.opr < 15 and WEB.dialNeedle or WEB.ink },
+    { 'ОЗР', '操作裕度', tostring(S.opr), 'ст.',
+      S.opr < 15 and ((math.sin(love.timer.getTime() * 6) > 0) and WEB.dialNeedle or WEB.panelFace2) or WEB.ink },
     { 'Xe-135', '氙浓度', string.format('%.2f', S.xe), 'отн.', WEB.ink },
     { 'α', '空泡', tostring(math.floor(S.voidFrac + 0.5)), '%', WEB.ink } }
   local cw = 84
@@ -340,7 +353,7 @@ local function drawPanelRods()
   drawPanelBox(L[1], L[2], L[3], L[4], 'ПОЛОЖЕНИЕ СТЕРЖНЕЙ', '控制棒棒位')
   local c = WEB.L.rodsCanvas
   love.graphics.push('all')
-  love.graphics.setScissor(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
+  setScissorD(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
   R2.drawRods(c[1], c[2], c[3], c[4], S)
   love.graphics.pop()
   local moving = math.abs(S.rodTarget - S.rodPos) > 0.5
@@ -371,7 +384,7 @@ local function drawPanelReactivity()
   love.graphics.print(cn, L[1] + L[3] / 2 - love.graphics.getFont():getWidth(cn) / 2, L[2] + 260)
   local ch = WEB.L.chartCanvas
   love.graphics.push('all')
-  love.graphics.setScissor(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
+  setScissorD(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
   R2.drawChart(ch[1], ch[2], ch[3], ch[4], S)
   love.graphics.pop()
   love.graphics.setFont(WEB.getFont('mono', 10))
@@ -762,9 +775,9 @@ local function drawMachineLog()
     local okA, Audio = pcall(require, 'src.audio.synth')
     if okA and Audio.zoom then Audio.zoom() end
   end)
-  love.graphics.push('all')
-  love.graphics.setScissor(L[1] + 2, L[2] + 22, L[3] - 4, L[4] - 24)
   local entries = AppRef and AppRef.logEntries or {}
+  love.graphics.push('all')
+  setScissorD(L[1] + 2, L[2] + 22, L[3] - 4, L[4] - 24)
   local lineH = 13
   local maxLines = math.floor((L[4] - 26) / lineH)
   local total = #entries
@@ -800,7 +813,7 @@ local function drawLogZoom()
   love.graphics.print('✕', x + w - 32, y + 10)
   addHit(x + w - 40, y + 8, 28, 24, function() logZoomOpen = false end)
   love.graphics.push('all')
-  love.graphics.setScissor(x + 8, y + 36, w - 16, h - 44)
+  setScissorD(x + 8, y + 36, w - 16, h - 44)
   local entries = AppRef and AppRef.logEntries or {}
   local lineH = 18
   local yOff = 0
@@ -964,9 +977,9 @@ function Hud.showEndlessPanelKind(kind)
     end
     if ov then
       lines[#lines + 1] = '平均能力 ' .. math.floor(ov.avgComp * 100 + 0.5) ..
-        '% · 平均士气 ' .. math.floor(ov.avgMorale * 100 + 0.5) .. '%'
+        '% · 平均士气 ' .. math.floor(ov.avgMorale * 100 + 0.5) .. '% · 奖金 ₽50K / 解雇 ₽60K'
     end
-    panel = { kind = 'list', title = 'СМЕНА · 班组', lines = lines }
+    panel = { kind = 'crew', title = 'СМЕНА · 班组', lines = lines, crew = crew }
   elseif kind == 'goals' then
     local lines = {}
     for _, g in ipairs(Endless.getGoals()) do
@@ -1050,6 +1063,7 @@ end
 
 local function drawEndlessPanel()
   local d = panel
+  local okE, Endless = pcall(require, 'src.endless')
   local pw, ph = 640, 460
   local px, py = 800 - pw / 2, 450 - ph / 2
   love.graphics.setColor(0.118, 0.110, 0.086, 0.75)
@@ -1122,19 +1136,38 @@ local function drawEndlessPanel()
     love.graphics.setColor(WEB.inkFaint)
     love.graphics.setFont(WEB.getFont('cn', 9))
     love.graphics.print('延迟不响应将按默认方式处理', px + 48, py + ph - 36)
-  elseif d.kind == 'list' then
+  elseif d.kind == 'list' or d.kind == 'crew' then
     love.graphics.setColor(WEB.engraved)
     love.graphics.setFont(WEB.getFont('cn', 16))
     love.graphics.print(d.title, px + pw / 2 - love.graphics.getFont():getWidth(d.title) / 2, y)
     y = y + 44
     love.graphics.push('all')
-    love.graphics.setScissor(px + 24, y, pw - 48, py + ph - y - 50)
-    love.graphics.setFont(WEB.getFont('cn', 12))
+    setScissorD(px + 24, y, pw - 48, py + ph - y - 50)
+    love.graphics.setFont(WEB.fontFor('cn', d.lines and d.lines[1] or '', 12))
     love.graphics.setColor(WEB.ink)
     for i, line in ipairs(d.lines or {}) do
       love.graphics.print(line, px + 40, y + (i - 1) * 22)
+      if d.kind == 'crew' and i > 1 then
+        local m = d.crew[i - 1]
+        if m then
+          if rockerBtnThen(px + pw - 190, y + (i - 1) * 22 - 2, 50, 20, '奖金', false) then
+            Endless.crewBonus(m.id)
+            Hud.showEndlessPanelKind('crew')
+          end
+          if rockerBtnThen(px + pw - 134, y + (i - 1) * 22 - 2, 50, 20, '解雇', true) then
+            Endless.crewFire(m.id)
+            Hud.showEndlessPanelKind('crew')
+          end
+        end
+      end
     end
     love.graphics.pop()
+    if d.kind == 'crew' then
+      if rockerBtnThen(px + 48, py + ph - 54, 130, 34, '招聘 ₽120K', false) then
+        Endless.crewHire()
+        Hud.showEndlessPanelKind('crew')
+      end
+    end
     if rockerBtnThen(px + pw / 2 - 80, py + ph - 54, 160, 36, '关闭 · ⏎', false) then
       Hud.closeEndlessPanel()
     end
@@ -1164,6 +1197,8 @@ function Hud.draw(App)
   drawMachineLog()
   drawStoryHud()
   drawEndlessHud()
+  Hud.drawChallengeHud()
+  Hud.drawAbout()
   drawDeskProps()
 
   if S.meltdown then drawMeltdownFx() end
@@ -1307,6 +1342,119 @@ function Hud.reset()
   endlessHudVisible = false
   Instrument.init()
   Instrument.initLamps()
+end
+
+
+-- ==================== 挑战 HUD / 关于铭牌（Web 对齐） ====================
+
+local challengeHudVisible = false
+local aboutOpen = false
+
+function Hud.showChallengeHud() challengeHudVisible = true end
+function Hud.hideChallengeHud() challengeHudVisible = false end
+
+function Hud.drawChallengeHud()
+  if not challengeHudVisible or not AppRef then return end
+  local okC, Challenge = pcall(require, 'src.challenge')
+  if not okC or not Challenge.getHud then return end
+  local h = Challenge.getHud()
+  if not h then return end
+  local x, y = 440, 0
+  love.graphics.setColor(0.047, 0.055, 0.047, 0.82)
+  love.graphics.rectangle('fill', x, y, 560, 64, 4)
+  love.graphics.setColor(0.839, 0.710, 0.376, 0.45)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle('line', x, y, 560, 64, 4)
+  -- ВРЕМЯ 倒计时
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('sans', 9))
+  love.graphics.print('ВРЕМЯ', x + 16, y + 6)
+  love.graphics.setFont(WEB.getFont('mono', 20))
+  love.graphics.setColor(h.time <= '01:00' and WEB.dialNeedle or WEB.ledAmber)
+  love.graphics.print(h.time, x + 16, y + 18)
+  -- ОЧКИ 得分
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('sans', 9))
+  love.graphics.print('ОЧКИ', x + 140, y + 6)
+  love.graphics.setFont(WEB.getFont('mono', 20))
+  love.graphics.setColor(WEB.ledAmber)
+  love.graphics.print(tostring(h.score), x + 140, y + 18)
+  -- 消息
+  love.graphics.setColor(WEB.consoleText)
+  love.graphics.setFont(WEB.fontFor('cn', h.msg, 11))
+  love.graphics.print(h.msg, x + 260, y + 22)
+end
+
+function Hud.showAbout()
+  aboutOpen = true
+  local okA, Audio = pcall(require, 'src.audio.synth')
+  if okA and Audio.paper then Audio.paper() end
+end
+
+function Hud.drawAbout()
+  if not aboutOpen then return end
+  love.graphics.setColor(0, 0, 0, 0.55)
+  love.graphics.rectangle('fill', -50, -50, 1700, 1000)
+  local w, h = 520, 470
+  local x, y = 800 - w / 2, 450 - h / 2
+  vgrad(x, y, w, h, WEB.panelFace, WEB.panelFace2, 4)
+  love.graphics.setColor(WEB.panelFrame)
+  love.graphics.setLineWidth(2)
+  love.graphics.rectangle('line', x + 1, y + 1, w - 2, h - 2, 8)
+  -- 四角螺丝
+  for _, sp in ipairs({ { 14, 14 }, { w - 14, 14 }, { 14, h - 14 }, { w - 14, h - 14 } }) do
+    love.graphics.setColor(WEB.screw)
+    love.graphics.circle('fill', x + sp[1], y + sp[2], 5)
+    love.graphics.setColor({ 0.659, 0.635, 0.565 })
+    love.graphics.circle('fill', x + sp[1] - 1, y + sp[2] - 1, 3)
+  end
+  -- 品牌
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('display', 24))
+  local brand = 'ТРЕНАЖЁР «ЩИТ»'
+  local bw = spacedWidth(brand, 3)
+  drawSpaced(brand, x + w / 2 - bw / 2, y + 36, 3)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 11))
+  local cn = '主控室训练模拟器'
+  love.graphics.print(cn, x + w / 2 - love.graphics.getFont():getWidth(cn) / 2, y + 68)
+  love.graphics.setColor(WEB.panelEdge)
+  love.graphics.line(x + 40, y + 96, x + w - 40, y + 96)
+
+  local rows = {
+    { 'ВЕРСИЯ', '版本', 'v0.1.0 «Первый щит»' },
+    { 'СБОРКА', '构建', 'сб.2026.11.14' },
+    { 'РЕВИЗИЯ', '修订', 'РЭ-86/16' },
+    { 'РАЗРАБОТКА', '开发', 'sx1922' },
+    { 'ПЛАТФОРМА', '平台', 'LÖVE 2D' },
+  }
+  local ry = y + 116
+  for _, r in ipairs(rows) do
+    love.graphics.setColor(WEB.engraved)
+    love.graphics.setFont(WEB.getFont('sans', 12))
+    love.graphics.print(r[1], x + 60, ry)
+    love.graphics.setColor(WEB.inkFaint)
+    love.graphics.setFont(WEB.getFont('cn', 9))
+    love.graphics.print(r[2], x + 60, ry + 16)
+    love.graphics.setColor(WEB.ink)
+    love.graphics.setFont(WEB.getFont('mono', 13))
+    love.graphics.print(r[3], x + 200, ry + 8)
+    ry = ry + 54
+    if r[1] == 'РЕВИЗИЯ' then
+      love.graphics.setColor(WEB.panelEdge)
+      love.graphics.line(x + 40, ry - 10, x + w - 40, ry - 10)
+    end
+  end
+  love.graphics.setColor(WEB.inkSoft)
+  love.graphics.setFont(WEB.getFont('cn', 9))
+  love.graphics.print('LÖVE 2D 移植版 · Web v0.2.3 全功能对齐', x + 60, y + h - 44)
+  -- 关闭按钮
+  love.graphics.setColor(WEB.btnBlack)
+  love.graphics.rectangle('fill', x + w - 56, y + 14, 34, 30, 3)
+  love.graphics.setColor(WEB.consoleText)
+  love.graphics.setFont(WEB.getFont('cn', 13))
+  love.graphics.print('✕', x + w - 46, y + 18)
+  addHit(x + w - 56, y + 14, 34, 30, function() aboutOpen = false end)
 end
 
 return Hud

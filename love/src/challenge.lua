@@ -244,4 +244,22 @@ function Challenge.current() return C end
 
 Challenge.DURATION_S = DURATION_S
 
+
+function Challenge.getHud()
+  if not C then return nil end
+  local t = math.max(0, math.ceil(C.timeLeft))
+  local mm = math.floor(t / 60)
+  local ss = t % 60
+  local msg
+  if C.event then
+    msg = '故障处理中…'
+  elseif C.targetNow ~= 62 and C.timeLeft < C.targetUntil then
+    msg = '调度要求：目标功率 ' .. C.targetNow .. ' %'
+  else
+    msg = '保持功率在目标附近 · 应对突发故障'
+  end
+  return { time = string.format('%02d:%02d', mm, ss), score = math.floor(C.score + 0.5),
+    msg = msg, event = C.event ~= nil }
+end
+
 return Challenge

@@ -121,16 +121,25 @@ end
 -- ==================== 报警灯状态机（4 态） ====================
 
 local lamps = {}
+local acked = {}
 local LAMP_IDS = { 'SEP_LO', 'SEP_HI', 'FW_COLD', 'THERMAL_SH', 'CLAD',
                    'PERIOD_W', 'PERIOD_C', 'DECAY', 'RAD' }
 
 function Instrument.initLamps()
   lamps = {}
-  for i = 1, #LAMP_IDS do lamps[LAMP_IDS[i]] = 'OFF' end
+  for i = 1, #LAMP_IDS do lamps[LAMP_IDS[i]] = "OFF" end
+  acked = {}
 end
 Instrument.initLamps()
 
 function Instrument.lampState(id) return lamps[id] or 'OFF' end
+
+-- 点击灯单元：抑制/恢复闪烁（web app.js lamp _acked）
+function Instrument.lampAck(id)
+  acked[id] = not acked[id]
+end
+
+function Instrument.lampIsAcked(id) return acked[id] == true end
 
 function Instrument.lampSet(id, condition)
   local current = lamps[id] or 'OFF'
