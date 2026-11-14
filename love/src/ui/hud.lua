@@ -615,7 +615,7 @@ end
 -- ==================== 浮层：电话/对话 ====================
 
 local function rgba(c, a)
-  return c[1], c[2], c[3], a
+  return { c[1], c[2], c[3], a }
 end
 
 local function drawFloat(f)

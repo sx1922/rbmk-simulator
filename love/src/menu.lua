@@ -161,7 +161,7 @@ end
 -- ==================== 绘制原语 ====================
 
 local function rgba(c, a)
-  return c[1], c[2], c[3], a or 1
+  return { c[1], c[2], c[3], a or 1 }
 end
 
 local function addHit(x, y, w, h, cb)
