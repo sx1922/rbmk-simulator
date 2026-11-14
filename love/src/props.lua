@@ -63,7 +63,13 @@ local manualPage = 0
 
 local function sfx(fn, ...)
   local okA, Audio = pcall(require, 'src.audio.synth')
-  if okA and Audio[fn] then Audio[fn](...) end
+  if not okA then return end
+  local m = Audio[fn]
+  if type(m) == 'function' then
+    m(...)
+  elseif m and m.play and Audio.play then
+    Audio.play(fn)
+  end
 end
 
 -- ==================== 通用绘制 ====================

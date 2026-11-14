@@ -243,4 +243,18 @@ end
 
 function SFX.setGeigerRunning(r) geiger.running = r and true or false end
 
+
+-- 统一播放入口：成员可能是函数（alarmTone 等）或预生成 Source（click/boom 等）
+function SFX.play(name, volMul)
+  local src = SFX[name]
+  if type(src) == 'function' then return src(SFX) end
+  if src and src.play then
+    local v = muted and 0 or masterVolume * (volMul or 1)
+    if v <= 0 then return end
+    src:setVolume(math.min(1, v))
+    src:stop()
+    src:play()
+  end
+end
+
 return SFX

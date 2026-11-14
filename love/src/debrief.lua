@@ -88,8 +88,9 @@ function Debrief.isOpen() return open end
 
 function Debrief.confirm()
   if not open then return end
+  local cb = data and data.onReturn or nil
   Debrief.hide()
-  if data and data.onReturn then data.onReturn() end
+  if cb then cb() end
 end
 
 local function drawLeft(d)

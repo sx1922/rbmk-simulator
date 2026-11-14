@@ -602,7 +602,6 @@ function App.draw()
     else
       Hud.draw(App)
     end
-    Props.draw(App)
     local okT, Tutorial = pcall(require, 'src.tutorial')
     if okT and Tutorial.isActive() then Tutorial.draw() end
   elseif App.state == 'DEBRIEF' then

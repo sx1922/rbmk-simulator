@@ -1,197 +1,37 @@
--- hud.lua — 主控室 HUD
--- 设计坐标 1600×900（Layout letterbox）。
--- 区域：1 反应堆面板 | 2 汽机/给水 | 3 辅助/辐射 | 4 报警灯阵+КВИТ | 底部日志
--- 浮层：story HUD（幕次/任务/日历）、endless HUD、电话/对话、点火/熔毁演出、无尽面板。
+-- hud.lua — 主控室 HUD · Web 版控制室的 LÖVE 复刻
+-- 布局坐标来自 1600×900 视口下 web/index.html 元素实测（见 webtheme.lua WEB.L）
+-- 配色/字体规格来自 web/style.css :root 与组件样式
 
-local Theme = require('src.ui.theme')
+local WEB = require('src.ui.webtheme')
+local R2 = require('src.ui.render2')
 local W = require('src.ui.widgets')
 local Engine = require('src.engine')
 local Instrument = require('src.instrument')
-local Journal = require('src.journal')
 
 local Hud = {}
 
-local S = nil -- Engine.S 快捷引用（draw 时取）
+local S = nil
+local AppRef = nil
 
 -- ==================== 输入状态 ====================
 
-local drag = nil            -- { kind='target'|'valve', ... }
-local rodHold = 0           -- -1/0/1（鼠标按住提插棒）
+local rodHold = 0
 local azCoverOpen = false
-local kvitPressed = 0
+local azCoverShake = 0
 local logScroll = 0
-local quadModeSplit = false
-local floatClicked = false
+local logZoomOpen = false
+local kvitPressed = 0
+local hitRows = {}
 
--- story HUD 状态
 local story = { act = nil, actRu = '', actCn = '', obj = '', objDone = false }
-
--- 无尽 HUD 状态
 local endlessHudVisible = false
+local panel = nil
+local panelOpenCb, panelCloseCb, bankruptCb = nil, nil, nil
 
--- 无尽面板（结算/事件/班组等）状态
-local panel = nil           -- { kind, data, buttons = { {x,y,w,h,id} } }
+-- ==================== 通用原语 ====================
 
--- ==================== 常量 ====================
-
-local LOG_X, LOG_Y, LOG_W, LOG_H = 16, 762, 1568, 128
-local TS_OPTIONS = { 1, 10, 60 }
-
-local LAMP_DEFS = {
-  { key = 'P1', label = 'П1', color = 'red' },
-  { key = 'P2', label = 'П2', color = 'red' },
-  { key = 'P3', label = 'П3', color = 'red' },
-  { key = 'P4', label = 'П4', color = 'red' },
-  { key = 'P5', label = 'П5', color = 'red' },
-  { key = 'AZ', label = 'АЗ-5', color = 'red' },
-  { key = 'SEP_LO', label = '水位低', color = 'orange', state = true },
-  { key = 'SEP_HI', label = '水位高', color = 'orange', state = true },
-  { key = 'FW_COLD', label = '给水低温', color = 'yellow', state = true },
-  { key = 'THERMAL_SH', label = '热冲击', color = 'orange', state = true },
-  { key = 'CLAD', label = '包壳', color = 'red', state = true },
-  { key = 'PERIOD_W', label = '周期警', color = 'yellow', state = true },
-  { key = 'PERIOD_C', label = '周期危', color = 'red', state = true },
-  { key = 'DECAY', label = '衰变热', color = 'orange', state = true },
-  { key = 'RAD', label = '辐射', color = 'red', state = true },
-}
-
-local LAMP_COLORS = {
-  red = { 0.95, 0.2, 0.14 },
-  orange = { 1, 0.55, 0.15 },
-  yellow = { 1, 0.85, 0.25 },
-}
-
--- ==================== 绘制原语 ====================
-
-local function drawPanelBox(x, y, w, h, title)
-  love.graphics.setColor(Theme.panel2)
-  love.graphics.rectangle('fill', x, y, w, h, 6)
-  love.graphics.setColor(Theme.edge)
-  love.graphics.setLineWidth(1)
-  love.graphics.rectangle('line', x, y, w, h, 6)
-  if title then
-    love.graphics.setColor(Theme.txtFaint)
-    love.graphics.setFont(Theme.getFont(10))
-    love.graphics.print(title, x + 10, y + 6)
-    love.graphics.setColor(Theme.edgeLo)
-    love.graphics.line(x + 6, y + 24, x + w - 6, y + 24)
-  end
-end
-
-local function readout(x, y, w, h, label, value, unit, color, alarm)
-  W.readout(x, y, w, h, label, value, unit, color, alarm)
-end
-
--- 圆表盘
-local function gauge(x, y, r, frac, label, sub, redFrom)
-  frac = math.max(0, math.min(1, frac or 0))
-  love.graphics.setColor(Theme.panel4)
-  love.graphics.circle('fill', x, y, r)
-  love.graphics.setColor(Theme.edgeLo)
-  love.graphics.setLineWidth(2)
-  love.graphics.circle('line', x, y, r)
-  -- 刻度
-  for i = 0, 10 do
-    local a = math.pi * 0.75 + math.pi * 1.5 * (i / 10)
-    local x1 = x + math.cos(a) * (r - 6)
-    local y1 = y + math.sin(a) * (r - 6)
-    local x2 = x + math.cos(a) * (r - (i % 5 == 0 and 14 or 10))
-    local y2 = y + math.sin(a) * (r - (i % 5 == 0 and 14 or 10))
-    love.graphics.setColor(Theme.txtFaint)
-    love.graphics.setLineWidth(i % 5 == 0 and 2 or 1)
-    love.graphics.line(x1, y1, x2, y2)
-  end
-  -- 红区
-  if redFrom then
-    local a0 = math.pi * 0.75 + math.pi * 1.5 * redFrom
-    love.graphics.setColor(0.95, 0.2, 0.14, 0.35)
-    love.graphics.setLineWidth(5)
-    love.graphics.arc('line', x, y, r - 9, a0, math.pi * 0.75 + math.pi * 1.5)
-  end
-  -- 指针
-  local na = math.pi * 0.75 + math.pi * 1.5 * frac
-  love.graphics.setColor(Theme.red)
-  love.graphics.setLineWidth(2)
-  love.graphics.line(x, y, x + math.cos(na) * (r - 16), y + math.sin(na) * (r - 16))
-  love.graphics.setColor(Theme.txtDim)
-  love.graphics.circle('fill', x, y, 3)
-  -- 标签
-  love.graphics.setColor(Theme.txtFaint)
-  love.graphics.setFont(Theme.getFont(9))
-  local lw = love.graphics.getFont():getWidth(label)
-  love.graphics.print(label, x - lw / 2, y + r / 2 - 4)
-  if sub then
-    love.graphics.setColor(Theme.amber)
-    love.graphics.setFont(Theme.getFont(11))
-    local sw = love.graphics.getFont():getWidth(sub)
-    love.graphics.print(sub, x - sw / 2, y + 8)
-  end
-end
-
--- 竖条液位计
-local function vbar(x, y, w, h, frac, bands)
-  love.graphics.setColor(Theme.panel4)
-  love.graphics.rectangle('fill', x, y, w, h, 3)
-  love.graphics.setColor(Theme.edgeLo)
-  love.graphics.rectangle('line', x, y, w, h, 3)
-  if bands then
-    for _, b in ipairs(bands) do
-      local by = y + h * (1 - b.hi)
-      local bh = h * (b.hi - b.lo)
-      love.graphics.setColor(b.color[1], b.color[2], b.color[3], 0.25)
-      love.graphics.rectangle('fill', x + 1, by, w - 2, bh)
-    end
-  end
-  local fh = (h - 4) * math.max(0, math.min(1, frac))
-  love.graphics.setColor(Theme.blue)
-  love.graphics.rectangle('fill', x + 2, y + h - 2 - fh, w - 4, fh, 2)
-end
-
--- 滑杆（水平）
-local function slider(id, x, y, w, val, lo, hi, label, fmt)
-  love.graphics.setColor(Theme.panel4)
-  love.graphics.rectangle('fill', x, y + 8, w, 8, 4)
-  love.graphics.setColor(Theme.edgeLo)
-  love.graphics.rectangle('line', x, y + 8, w, 8, 4)
-  local frac = (val - lo) / (hi - lo)
-  love.graphics.setColor(Theme.amber)
-  love.graphics.rectangle('fill', x, y + 8, math.max(1, w * math.min(1, math.max(0, frac))), 8, 4)
-  local knobX = x + w * math.min(1, math.max(0, frac)) - 7
-  love.graphics.setColor(Theme.txt)
-  love.graphics.rectangle('fill', knobX, y + 2, 14, 20, 3)
-  love.graphics.setColor(Theme.txtFaint)
-  love.graphics.setFont(Theme.getFont(9))
-  love.graphics.print(label, x, y - 4)
-  local vt = fmt and fmt(val) or tostring(math.floor(val + 0.5))
-  love.graphics.setColor(Theme.amber)
-  love.graphics.setFont(Theme.getFont(11))
-  love.graphics.print(vt, x + w - love.graphics.getFont():getWidth(vt), y - 6)
-  return knobX
-end
-
--- rocker 按钮组
-local function rocker(id, x, y, options, activeIdx, w, h)
-  w = w or 64
-  h = h or 26
-  local clicked = 0
-  for i, opt in ipairs(options) do
-    local bx = x + (i - 1) * (w + 4)
-    local active = i == activeIdx
-    love.graphics.setColor(active and { 0.55, 0.4, 0.12 } or Theme.panel4)
-    love.graphics.rectangle('fill', bx, y, w, h, 3)
-    love.graphics.setColor(active and Theme.amber or Theme.edgeLo)
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle('line', bx, y, w, h, 3)
-    love.graphics.setColor(active and Theme.amber or Theme.txtFaint)
-    love.graphics.setFont(Theme.getFont(10))
-    local tw = love.graphics.getFont():getWidth(opt)
-    love.graphics.print(opt, bx + w / 2 - tw / 2, y + h / 2 - 6)
-    local mx, my = W.mouse.x, W.mouse.y
-    if mx >= bx and mx <= bx + w and my >= y and my <= y + h and W.mouse.pressed then
-      clicked = i
-    end
-  end
-  return clicked
+local function addHit(x, y, w, h, cb)
+  hitRows[#hitRows + 1] = { x = x, y = y, w = w, h = h, cb = cb }
 end
 
 local function hitbox(x, y, w, h)
@@ -199,456 +39,984 @@ local function hitbox(x, y, w, h)
   return mx >= x and mx <= x + w and my >= y and my <= y + h
 end
 
-local function button(x, y, w, h, label, opts)
-  opts = opts or {}
-  local hover = hitbox(x, y, w, h)
-  local pressed = hover and W.mouse.pressed
-  local bg = opts.active and { 0.55, 0.4, 0.12 } or Theme.panel4
-  if hover then
-    bg = { bg[1] + 0.07, bg[2] + 0.07, bg[3] + 0.07 }
+local function hover(x, y, w, h) return hitbox(x, y, w, h) end
+
+local function utf8chars(s)
+  local chars = {}
+  local i = 1
+  while i <= #s do
+    local b = s:byte(i)
+    local n = b < 0x80 and 1 or (b < 0xE0 and 2 or (b < 0xF0 and 3 or 4))
+    chars[#chars + 1] = s:sub(i, i + n - 1)
+    i = i + n
   end
-  love.graphics.setColor(bg)
+  return chars
+end
+
+local function drawSpaced(text, x, y, spacing)
+  local cx = x
+  local f = love.graphics.getFont()
+  for _, ch in ipairs(utf8chars(text)) do
+    love.graphics.print(ch, cx, y)
+    cx = cx + f:getWidth(ch) + spacing
+  end
+  return cx - x
+end
+
+local function spacedWidth(text, spacing)
+  local f = love.graphics.getFont()
+  local w = 0
+  for _, ch in ipairs(utf8chars(text)) do w = w + f:getWidth(ch) + spacing end
+  return math.max(0, w - spacing)
+end
+
+local function vgrad(x, y, w, h, c1, c2, bands)
+  bands = bands or 6
+  for i = 0, bands - 1 do
+    local t = i / (bands - 1)
+    love.graphics.setColor(
+      c1[1] + (c2[1] - c1[1]) * t,
+      c1[2] + (c2[2] - c1[2]) * t,
+      c1[3] + (c2[3] - c1[3]) * t)
+    love.graphics.rectangle('fill', x, y + h * i / bands, w, h / bands + 1)
+  end
+end
+
+local function radialCircle(cx, cy, r, hi, mid)
+  love.graphics.setColor(mid)
+  love.graphics.circle('fill', cx, cy, r)
+  love.graphics.setColor(hi)
+  love.graphics.circle('fill', cx - r * 0.18, cy - r * 0.14, r * 0.62)
+end
+
+local function drawPanelBox(x, y, w, h, ru, cn)
+  vgrad(x, y, w, h, WEB.panelFace, WEB.panelFace2, 4)
+  love.graphics.setColor(WEB.panelFrame)
+  love.graphics.setLineWidth(2)
+  love.graphics.rectangle('line', x + 1, y + 1, w - 2, h - 2, 4)
+  love.graphics.setColor(1, 1, 1, 0.5)
+  love.graphics.line(x + 2, y + 2, x + w - 2, y + 2)
+  for _, sx in ipairs({ x + 9, x + w - 9 }) do
+    love.graphics.setColor(WEB.screw)
+    love.graphics.circle('fill', sx, y + 9, 4)
+    love.graphics.setColor({ 0.659, 0.635, 0.565 })
+    love.graphics.circle('fill', sx - 1, y + 8, 2.5)
+  end
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('display', 13))
+  local rw = spacedWidth(ru, 2)
+  drawSpaced(ru, x + w / 2 - rw / 2, y + 8, 2)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 10))
+  local cw = love.graphics.getFont():getWidth(cn)
+  love.graphics.print(cn, x + w / 2 - cw / 2, y + 25)
+  love.graphics.setColor(WEB.panelEdge)
+  love.graphics.setLineWidth(1)
+  love.graphics.line(x + 8, y + 40, x + w - 8, y + 40)
+end
+
+local function readoutCard(x, y, w, h, ru, cn, value, unit, vcolor)
+  love.graphics.setColor(WEB.panelFace2)
+  love.graphics.rectangle('fill', x, y, w, h, 2)
+  love.graphics.setColor(WEB.panelEdge)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle('line', x, y, w, h, 2)
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('sans', 10))
+  love.graphics.print(ru, x + w / 2 - love.graphics.getFont():getWidth(ru) / 2, y + 3)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 9))
+  love.graphics.print(cn, x + w / 2 - love.graphics.getFont():getWidth(cn) / 2, y + 15)
+  love.graphics.setColor(vcolor or WEB.ink)
+  love.graphics.setFont(WEB.getFont('mono', 15))
+  local vw = love.graphics.getFont():getWidth(value)
+  love.graphics.print(value, x + w / 2 - vw / 2, y + 27)
+  if unit and unit ~= '' then
+    love.graphics.setColor(WEB.inkFaint)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print(unit, x + w / 2 + vw / 2 + 2, y + 31)
+  end
+end
+
+local function lampUnit(x, y, w, h, ru, cn, on, color, blink)
+  love.graphics.setColor(WEB.panelFace2)
   love.graphics.rectangle('fill', x, y, w, h, 3)
-  love.graphics.setColor(opts.danger and Theme.redDeep or Theme.edgeLo)
+  love.graphics.setColor(WEB.panelEdge)
   love.graphics.setLineWidth(1)
   love.graphics.rectangle('line', x, y, w, h, 3)
-  love.graphics.setColor(opts.color or (opts.active and Theme.amber or Theme.txtDim))
-  love.graphics.setFont(Theme.getFont(opts.size or 10))
+  local cx, cy = x + w / 2, y + 14
+  local r = 10
+  if on then
+    radialCircle(cx, cy, r, { color[1] * 1.35, color[2] * 1.3, color[3] * 1.25 }, color)
+    if blink then
+      love.graphics.setColor(0, 0, 0, (math.sin(love.timer.getTime() * 8) > 0) and 0 or 0.55)
+      love.graphics.circle('fill', cx, cy, r)
+    end
+  else
+    radialCircle(cx, cy, r, { 0.933, 0.914, 0.855 }, WEB.lampOff)
+  end
+  love.graphics.setColor({ 0.604, 0.580, 0.518 })
+  love.graphics.setLineWidth(2)
+  love.graphics.circle('line', cx, cy, r)
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('display', 11))
+  local rw = love.graphics.getFont():getWidth(ru)
+  love.graphics.print(ru, x + w / 2 - rw / 2, y + 28)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 8))
+  local cw = love.graphics.getFont():getWidth(cn)
+  love.graphics.print(cn, x + w / 2 - cw / 2, y + 43)
+end
+
+local function rockerBtn(x, y, w, h, ru, cn, active, held)
+  if active then
+    vgrad(x, y, w, h, { 0.290, 0.275, 0.227 }, { 0.180, 0.173, 0.149 }, 3)
+    love.graphics.setColor(WEB.ledAmber)
+  elseif held then
+    vgrad(x, y, w, h, { 0.478, 0.455, 0.345 }, { 0.361, 0.341, 0.290 }, 3)
+    love.graphics.setColor(WEB.ledAmber)
+  else
+    vgrad(x, y, w, h, WEB.btnCream, { 0.659, 0.635, 0.565 }, 3)
+    love.graphics.setColor(WEB.engraved)
+  end
+  love.graphics.setColor(WEB.inkSoft)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle('line', x + 0.5, y + 0.5, w - 1, h - 1, 3)
+  if not active then
+    love.graphics.setColor(WEB.screw)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(x + 1, y + h - 1, x + w - 1, y + h - 1)
+  end
+  love.graphics.setFont(WEB.fontFor('sans', ru, 10))
+  local rw = love.graphics.getFont():getWidth(ru)
+  local cnw = cn and (love.graphics.getFont():getWidth(cn) + 3) or 0
+  local tx = x + w / 2 - (rw + cnw) / 2
+  love.graphics.print(ru, tx, y + h / 2 - 8)
+  if cn then
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print(cn, tx + rw + 3, y + h / 2 - 6)
+  end
+end
+
+function rockerBtnThen(x, y, w, h, label, danger)
+  local mx, my = W.mouse.x, W.mouse.y
+  local hov = mx >= x and mx <= x + w and my >= y and my <= y + h
+  local pressed = hov and W.mouse.pressed
+  vgrad(x, y, w, h, danger and WEB.btnRed or WEB.btnCream,
+    danger and { 0.588, 0.078, 0.039 } or { 0.659, 0.635, 0.565 }, 3)
+  love.graphics.setColor(WEB.inkSoft)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle('line', x + 0.5, y + 0.5, w - 1, h - 1, 3)
+  love.graphics.setColor(danger and { 1, 1, 1 } or WEB.ink)
+  love.graphics.setFont(WEB.fontFor('cn', label, 12))
   local tw = love.graphics.getFont():getWidth(label)
-  love.graphics.print(label, x + w / 2 - tw / 2, y + h / 2 - (opts.size or 10) * 0.62)
+  love.graphics.print(label, x + w / 2 - tw / 2, y + h / 2 - 8)
   return pressed
 end
 
-local function formatClock(t)
-  local function p2(n)
-    n = math.floor(n)
-    if n < 10 then return '0' .. n end
-    return tostring(n)
-  end
-  return p2((t / 3600) % 24) .. ':' .. p2((t / 60) % 60) .. ':' .. p2(t % 60)
+local function ledReadout(x, y, text)
+  love.graphics.setColor(WEB.btnBlack)
+  love.graphics.setFont(WEB.getFont('mono', 12))
+  love.graphics.rectangle('fill', x, y, love.graphics.getFont():getWidth(text) + 16, 20, 2)
+  love.graphics.setColor(WEB.ledAmber)
+  love.graphics.print(text, x + 8, y + 3)
 end
 
--- ==================== 区域绘制 ====================
+-- ==================== 墙面 / 厂牌 / 挂钟 ====================
 
-local function drawZone1(App)
-  drawPanelBox(16, 56, 584, 592, 'РЕАКТОР · 反应堆控制')
-  local S = Engine.S
-  local cx = 136
-
-  -- 功率表
-  local disp = Instrument.update('power', Instrument.truncatePower(S.n), App.lastDt or 0.016)
-  local mw = math.floor(S.n * Engine.N_NOM + 0.5)
-  gauge(cx, 150, 78, disp / 1.2, 'N %Ном', mw .. ' МВт', 110 / 120)
-  -- 周期表（对数：中心 ∞，右正左负）
-  local per = S.period
-  local pfrac = 0.5
-  if per ~= math.huge and per ~= -per and math.abs(per) < 1000 then
-    -- 对数映射：-10..+10 秒 → 0..1（中心 0.5）
-    local lg = math.log10(math.abs(per)) / 3 -- 1..1000 → 0..1
-    pfrac = 0.5 + (per > 0 and lg * 0.5 or -lg * 0.5)
-    pfrac = math.max(0, math.min(1, pfrac))
+local function drawRoom()
+  vgrad(0, 0, 1600, 900, WEB.wallHi, WEB.wallLo, 10)
+  vgrad(0, 620, 1600, 280, WEB.wallMid, WEB.wallLo, 6)
+  for _, fx in ipairs({ 0.12, 0.48, 0.84 }) do
+    local x = 1600 * fx - 112
+    love.graphics.setColor(WEB.fluor)
+    love.graphics.rectangle('fill', x, 0, 224, 10, 0, 4)
+    love.graphics.setColor(1, 1, 1, 0.18)
+    love.graphics.rectangle('fill', x - 20, 0, 264, 26, 0, 8)
   end
-  gauge(cx, 300, 60, pfrac, 'ПЕРИОД, с', per == math.huge and '∞' or
-    (math.abs(per) >= 1000 and '∞' or string.format('%.0f', per)), nil)
+end
 
-  -- ORM / 氙 / 空泡 读数
-  readout(232, 96, 160, 44, 'ОЗР / ОРМ 根', tostring(S.opr), '安全裕度',
-    S.opr < 15 and Theme.red or (S.opr < 26 and Theme.amber or Theme.green), S.opr < 15)
-  readout(404, 96, 176, 44, 'XE-135 氙毒', string.format('%.2f', S.xe), '碘坑风险',
-    S.xe > 1.2 and Theme.red or (S.xe > 0.8 and Theme.amber or Theme.txt))
-  readout(232, 148, 160, 44, 'α 空泡份额 %', string.format('%.1f', S.voidFrac), 'RBMK 正反馈核心',
-    S.voidFrac > 45 and Theme.red or Theme.txt)
-  readout(404, 148, 176, 44, 'T топл 燃料 K', string.format('%.0f', S.fuelTemp), '熔毁阈值 2800',
-    S.fuelTemp > 1000 and Theme.red or Theme.txt)
-
-  -- 象限 2×2
-  local qActive = S.enable_quadrant_model and quadModeSplit
-  for i = 1, 4 do
-    local qx = 244 + ((i - 1) % 2) * 92
-    local qy = 216 + math.floor((i - 1) / 2) * 76
-    local v = qActive and S.quadrant_power[i] or S.n * Engine.N_NOM / 4
-    gauge(qx + 36, qy + 30, 28, v / 1000, tostring(i), math.floor(v + 0.5) .. '', 0.9)
-  end
-  local modeSwitch = button(430, 240, 150, 24, quadModeSplit and '分 · РАЗДЕЛЬНО' or '总 · СУММА', { active = quadModeSplit })
-  if modeSwitch then quadModeSplit = not quadModeSplit end
-  W.label(430, 270, '象限显示', 9, Theme.txtFaint)
-
-  -- 棒位条 + 目标功率
-  local rodFrac = S.rodPos / 100
-  love.graphics.setColor(Theme.panel4)
-  love.graphics.rectangle('fill', 40, 396, 360, 26, 3)
-  love.graphics.setColor(Theme.cyan)
-  love.graphics.rectangle('fill', 40, 396, 360 * rodFrac, 26, 3)
-  love.graphics.setColor(Theme.edgeLo)
-  love.graphics.rectangle('line', 40, 396, 360, 26, 3)
-  love.graphics.setColor(Theme.txt)
-  love.graphics.setFont(Theme.getFont(11))
-  love.graphics.print(string.format('棒位 %.1f%%', S.rodPos), 412, 402)
-  W.label(40, 380, '控制棒 · СТЕРЖНИ', 9, Theme.txtFaint)
-
-  local knob = slider('target', 40, 448, 360, S.targetPower, 0, 120, '目标功率 · ЗАДАННАЯ МОЩНОСТЬ',
-    function(v) return math.floor(v + 0.5) .. ' %' end)
-  if hitbox(40, 436, 360, 40) and W.mouse.down then
-    local v = (W.mouse.x - 40) / 360 * 120
-    if v < 0 then v = 0 elseif v > 120 then v = 120 end
-    Engine.setTargetPower(v)
-    App.countOp()
-  end
-
-  -- 模式 rocker + 提插棒
-  local m = rocker('mode', 40, 496, { 'АВТО 自动', 'РУЧН 手动' }, S.mode == 'auto' and 1 or 2, 110, 28)
-  if m == 1 and S.mode ~= 'auto' then Engine.setMode('auto'); App.countOp() end
-  if m == 2 and S.mode ~= 'manual' then Engine.setMode('manual'); App.countOp() end
-
-  local upPressed = button(280, 492, 90, 34, '▲ 提棒', { active = rodHold > 0 })
-  local dnPressed = button(376, 492, 90, 34, '▼ 插棒', { active = rodHold < 0 })
-  if upPressed then
-    Engine.beginRodMove(1); rodHold = 1; App.countOp()
-  elseif dnPressed then
-    Engine.beginRodMove(-1); rodHold = -1; App.countOp()
-  elseif rodHold ~= 0 and not (W.mouse.down and (hitbox(280, 492, 90, 34) or hitbox(376, 492, 90, 34))) then
-    Engine.endRodMove(); rodHold = 0
-  end
-  if S.rod_drive_overheat then
-    W.label(280, 530, '⚠ 驱动过热闭锁', 10, Theme.red)
-  elseif S.active_rod_drives > 0 then
-    W.label(280, 530, '在动 ' .. S.active_rod_drives .. ' / 40', 10, Theme.amber)
-  end
-
-  -- AZ-5 组件
-  local azx, azy = 480, 380
-  drawPanelBox(azx, azy, 108, 256, 'АЗ-5')
-  -- 钥匙
-  local keyOn = S.azBlocked
-  love.graphics.setColor(Theme.panel4)
-  love.graphics.rectangle('fill', azx + 24, azy + 34, 60, 40, 4)
-  love.graphics.setColor(keyOn and Theme.red or Theme.green)
-  love.graphics.rectangle('fill', azx + 44, keyOn and azy + 38 or azy + 52, 20, 14, 2)
-  W.label(azx + 12, azy + 78, keyOn and '闭锁 ЗАПРЕТ' or '允许 РАЗРЕШЕН', 8,
-    keyOn and Theme.red or Theme.green)
-  if hitbox(azx + 24, azy + 34, 60, 40) and W.mouse.pressed then
-    Engine.toggleKey()
-  end
-  -- 玻璃罩
-  love.graphics.setColor(azCoverOpen and { 0.12, 0.16, 0.14 } or { 0.14, 0.18, 0.2 })
-  love.graphics.rectangle('fill', azx + 14, azy + 100, 80, 60, 6)
-  love.graphics.setColor(azCoverOpen and Theme.green or Theme.txtFaint)
+local function drawPlantSign()
+  local L = WEB.L.plantSign
+  vgrad(L[1], L[2], L[3], L[4], { 0.541, 0.122, 0.078 }, { 0.431, 0.094, 0.063 }, 3)
+  love.graphics.setColor({ 0.290, 0.063, 0.039 })
   love.graphics.setLineWidth(2)
-  love.graphics.rectangle('line', azx + 14, azy + 100, 80, 60, 6)
-  W.labelCenter(azx + 54, azy + 124, azCoverOpen and '罩已开' or '玻璃罩', 9,
-    azCoverOpen and Theme.green or Theme.txtFaint)
-  if hitbox(azx + 14, azy + 100, 80, 60) and W.mouse.pressed then
-    azCoverOpen = not azCoverOpen
-  end
-  -- AZ-5 按钮
-  local azReady = azCoverOpen and not S.azFired and not S.azBlocked
-  local azPressed = button(azx + 14, azy + 170, 80, 44, 'АЗ-5',
-    { danger = true, active = false, color = azReady and { 1, 1, 1 } or Theme.txtFaint, size = 14 })
-  if azPressed and azCoverOpen then
-    Hud.pressAZ5(App)
-  elseif azPressed then
-    App.logEvent('warn', 'АЗ-5 заблокирован колпаком — 请先打开玻璃罩')
-  end
+  love.graphics.rectangle('line', L[1] + 1, L[2] + 1, L[3] - 2, L[4] - 2, 3)
+  love.graphics.setColor({ 0.949, 0.910, 0.847 })
+  love.graphics.setFont(WEB.getFont('display', 14))
+  local ru = 'ЧЕРНОБЫЛЬСКАЯ АЭС ИМ. В.И. ЛЕНИНА'
+  local rw = spacedWidth(ru, 3)
+  drawSpaced(ru, L[1] + L[3] / 2 - rw / 2, L[2] + 7, 3)
+  love.graphics.setFont(WEB.getFont('cn', 9))
+  local cn = '切尔诺贝利核电站 · 4号机组 · РБМК-1000'
+  local cw = love.graphics.getFont():getWidth(cn)
+  love.graphics.print(cn, L[1] + L[3] / 2 - cw / 2, L[2] + 34)
 end
 
-local function drawZone2(App)
-  drawPanelBox(616, 56, 384, 592, 'ТУРБИНА / ПИТАНИЕ · 汽机与给水')
-  local S = Engine.S
-
-  -- 分离器液位
-  vbar(648, 96, 34, 220, S.separator_level / 2, {
-    { lo = 0.4, hi = 0.6, color = Theme.green },
-    { lo = 0.15, hi = 0.25, color = Theme.amber },
-  })
-  W.label(640, 322, 'УРОВЕНЬ ДС', 8, Theme.txtFaint)
-  love.graphics.setFont(Theme.getFont(10))
-  love.graphics.setColor(Theme.amber)
-  love.graphics.print(string.format('%.2f м', S.separator_level), 640, 336)
-
-  -- 分离器压力表
-  local dispP = Instrument.update('sep_press', S.separator_pressure, App.lastDt or 0.016)
-  gauge(790, 160, 64, dispP / 8, 'ДАВЛ. МПа', string.format('%.1f', S.separator_pressure), 7.25 / 8)
-
-  -- 给水温度 / 蒸汽流量 / 给水流量
-  local dispT = Instrument.update('fw_temp', S.feedwater_temp, App.lastDt or 0.016)
-  gauge(790, 300, 52, dispT / 300, 'T ПИТ. °C', string.format('%.0f', S.feedwater_temp), nil)
-  readout(870, 96, 110, 40, 'G пар т/ч', tostring(math.floor(S.steam_flow + 0.5)))
-  readout(870, 144, 110, 40, 'G пит м³/ч', tostring(math.floor(S.feedwater_flow + 0.5)))
-
-  -- 衰变热
-  local dhColor = S.decay_heat_power > 200 and Theme.red or (S.decay_heat_power > 100 and Theme.amber or Theme.txt)
-  readout(648, 380, 200, 44, 'ОСТ. ТЕПЛ 衰变热',
-    S.decay_heat_power > 0 and (math.floor(S.decay_heat_power + 0.5) .. ' МВт') or '0', '停堆后热源', dhColor)
-  readout(860, 380, 120, 44, 'КВИТ 阀位', math.floor(S.turbine_valve_opening * 100 + 0.5) .. ' %')
-
-  -- 汽机阀滑杆
-  local knob = slider('valve', 648, 452, 330, S.turbine_valve_opening * 100, 0, 100,
-    '汽轮机调节阀 · КЛАПАН', function(v) return math.floor(v + 0.5) .. ' %' end)
-  if hitbox(648, 440, 330, 40) and W.mouse.down then
-    local v = (W.mouse.x - 648) / 330 * 100
-    if v < 0 then v = 0 elseif v > 100 then v = 100 end
-    S.turbine_valve_opening = v / 100
-    App.countOp()
-  end
-
-  -- 主循环泵 8 台
-  W.label(648, 496, 'ГЦН 主循环泵 · 停泵需操作票', 9, Theme.txtFaint)
-  for i = 1, 8 do
-    local px = 648 + ((i - 1) % 4) * 88
-    local py = 514 + math.floor((i - 1) / 4) * 44
-    local running = S.pumps[i]
-    if button(px, py, 80, 36, 'ГЦН-' .. i, { active = running,
-      color = running and Theme.green or Theme.txtFaint }) then
-      local wasOn = S.pumps[i]
-      Engine.togglePump(i)
-      if wasOn and App.stats then App.stats.pumpsStopped = App.stats.pumpsStopped + 1 end
-      App.countOp()
-    end
-  end
-  local onCount = 0
-  for i = 1, 8 do if S.pumps[i] then onCount = onCount + 1 end end
-  W.label(648, 606, '运行 ' .. onCount .. ' / 8 · 流量 ' .. math.floor(S.flow) .. '%', 10, Theme.txtDim)
+local function drawClock()
+  local L = WEB.L.wallClock
+  R2.drawClock(L[1], L[2], 120, S.t)
+  local d = WEB.L.datePlate
+  love.graphics.setColor(WEB.btnBlack)
+  love.graphics.rectangle('fill', d[1], d[2], d[3], d[4], 2)
+  love.graphics.setColor(WEB.ledAmber)
+  love.graphics.setFont(WEB.getFont('mono', 10))
+  local txt = os.date('%d.%m.1986')
+  love.graphics.print(txt, d[1] + (d[3] - love.graphics.getFont():getWidth(txt)) / 2, d[2] + 2)
 end
 
-local function drawZone3(App)
-  drawPanelBox(1016, 56, 190, 592, 'ДОЗА /辅助')
-  local S = Engine.S
+-- ==================== 上排面板 ====================
 
-  local dispDose = Instrument.update('dose', S.containment_dose_rate, App.lastDt or 0.016)
-  local doseText = dispDose >= 100 and string.format('%.0f', dispDose)
-    or (dispDose >= 1 and string.format('%.1f', dispDose) or string.format('%.2f', dispDose))
-  readout(1030, 92, 162, 52, 'ДП-5В 剂量率', doseText, 'mR/h',
-    dispDose > 10 and Theme.red or (dispDose > 1 and Theme.amber or Theme.green),
-    dispDose > 10)
-
-  readout(1030, 152, 162, 44, '包壳完整性',
-    math.floor(S.clad_integrity * 100 + 0.5) .. ' %', nil,
-    S.clad_integrity < 0.5 and Theme.red or (S.clad_integrity < 0.8 and Theme.amber or Theme.green))
-
-  local act = S.coolant_activity
-  local actText = act >= 1000 and string.format('%.1e', act) or tostring(math.floor(act + 0.5))
-  readout(1030, 204, 162, 44, '冷却剂活度', actText, 'Бк/см³',
-    act > 1e5 and Theme.amber or Theme.txt)
-
-  -- 量程 rocker
-  W.label(1030, 264, 'ДИАПАЗОН КИП 量程', 9, Theme.txtFaint)
-  local names = { 'С', 'П', '1', '2', '3' }
-  local r = rocker('range', 1030, 280, names, Instrument.currentRangeId() + 1, 32, 26)
-  if r > 0 and r - 1 ~= Instrument.currentRangeId() then
-    Instrument.switchRange(r - 1)
-    App.logEvent('info', '切换功率量程至 [' .. Instrument.rangeName() .. ']')
-    App.countOp()
-  end
-  W.label(1030, 312, Instrument.rangeName() .. (Instrument.switching() and ' · 切换中' or ''), 9, Theme.txtDim)
-
-  -- 时间倍率
-  W.label(1030, 340, '时间倍率 · УСКОР.', 9, Theme.txtFaint)
-  local tsLabels = {}
-  for i = 1, #TS_OPTIONS do tsLabels[i] = '×' .. TS_OPTIONS[i] end
-  local tsIdx = 1
-  for i = 1, #TS_OPTIONS do
-    if TS_OPTIONS[i] == S.timeScale then tsIdx = i end
-  end
-  local ts = rocker('ts', 1030, 356, tsLabels, tsIdx, 52, 26)
-  if ts > 0 then
-    Engine.setTimeScale(TS_OPTIONS[ts])
-    if App.endless then
-      local okE, Endless = pcall(require, 'src.endless')
-      if okE and Endless.setSpeed then Endless.setSpeed(TS_OPTIONS[ts]) end
-    end
-  end
-
-  -- 操作统计
-  readout(1030, 404, 162, 44, '操作次数', tostring(App.stats and App.stats.opCount or 0))
-  readout(1030, 456, 162, 44, '运行时长', formatClock(S.t))
-end
-
-local function drawZone4(App)
-  drawPanelBox(1222, 56, 362, 592, 'СИГНАЛИЗАЦИЯ · 报警与记录')
-  local S = Engine.S
-
-  -- 报警灯阵
-  local lampW, lampH = 68, 30
-  local cols = 5
-  for i, def in ipairs(LAMP_DEFS) do
-    local lx = 1240 + ((i - 1) % cols) * (lampW + 3)
-    local ly = 92 + math.floor((i - 1) / cols) * (lampH + 6)
-    local on
-    if def.state then
-      on = Instrument.lampState(def.key) ~= 'OFF'
+local function drawPanelPower()
+  local L = WEB.L.panelPower
+  drawPanelBox(L[1], L[2], L[3], L[4], 'МОЩНОСТЬ И ПЕРИОД', '功率与周期')
+  for _, dial in ipairs({
+      { WEB.L.dialPower, 'N, МВт(т)', '热功率', 'power' },
+      { WEB.L.dialPeriod, 'ПЕРИОД, с', '周期', 'period' } }) do
+    local d = dial[1]
+    if dial[4] == 'power' then
+      R2.drawPower(d[1], d[2], d[3], d[4], S.n)
     else
-      on = S.alarms[def.key]
+      R2.drawPeriod(d[1], d[2], d[3], d[4], S.period)
     end
-    local blink = false
-    if def.state then
-      local st = Instrument.lampState(def.key)
-      blink = st == 'FAST_BLINK' or st == 'SLOW_BLINK'
+    love.graphics.setColor(WEB.engraved)
+    love.graphics.setFont(WEB.getFont('sans', 10))
+    love.graphics.print(dial[2], d[1] + d[3] / 2 - love.graphics.getFont():getWidth(dial[2]) / 2, d[2] + d[4] + 2)
+    love.graphics.setColor(WEB.inkFaint)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print(dial[3], d[1] + d[3] / 2 - love.graphics.getFont():getWidth(dial[3]) / 2, d[2] + d[4] + 14)
+    local val
+    if dial[4] == 'power' then
+      val = tostring(math.floor(S.n * Engine.N_NOM + 0.5))
+    else
+      local T = S.period
+      if T == math.huge or T ~= T or T == -math.huge then val = '∞'
+      else val = (T > 0 and '+' or '') .. string.format('%.1f', T) end
     end
-    local col = LAMP_COLORS[def.color] or LAMP_COLORS.red
-    local lit = on
-    if blink then
-      local speed = Instrument.lampState(def.key) == 'FAST_BLINK' and 8 or 2
-      lit = on and (math.sin(love.timer.getTime() * speed) > -0.2)
-    end
-    love.graphics.setColor(lit and col or { 0.1, 0.08, 0.08 })
-    love.graphics.rectangle('fill', lx, ly, lampW, lampH, 3)
-    love.graphics.setColor(Theme.edgeLo)
-    love.graphics.rectangle('line', lx, ly, lampW, lampH, 3)
-    love.graphics.setColor(lit and { 0.05, 0.03, 0.03 } or col)
-    love.graphics.setFont(Theme.getFont(10))
-    local tw = love.graphics.getFont():getWidth(def.label)
-    love.graphics.print(def.label, lx + lampW / 2 - tw / 2, ly + lampH / 2 - 7)
+    love.graphics.setColor(WEB.readoutBg)
+    love.graphics.rectangle('fill', d[1] + d[3] / 2 - 35, d[2] + d[4] + 26, 70, 22, 2)
+    love.graphics.setColor(WEB.panelEdge)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle('line', d[1] + d[3] / 2 - 35, d[2] + d[4] + 26, 70, 22, 2)
+    love.graphics.setColor(dial[4] == 'period' and S.period > 0 and S.period < 10
+      and S.period ~= math.huge and WEB.dialNeedle or WEB.ink)
+    love.graphics.setFont(WEB.getFont('mono', 14))
+    love.graphics.print(val, d[1] + d[3] / 2 - love.graphics.getFont():getWidth(val) / 2, d[2] + d[4] + 28)
   end
+  local lb = WEB.L.lampBank
+  local defs = {
+    { 'П1', '功率', S.alarms.P1 }, { 'П2', '周期', S.alarms.P2 },
+    { 'П3', '压力', S.alarms.P3 }, { 'П4', '水位', S.alarms.P4 },
+    { 'П5', '破损', S.alarms.P5 }, { 'АЗ', '动作', S.alarms.AZ },
+  }
+  local uw = (lb[3] - 30) / 6
+  for i, def in ipairs(defs) do
+    local x = lb[1] + 15 + (i - 1) * uw
+    lampUnit(x, lb[2], uw - 6, 68, def[1], def[2], def[3], WEB.lampRed, false)
+    addHit(x, lb[2], uw - 6, 68, function() end)
+  end
+end
 
-  -- КВИТ
-  kvitPressed = kvitPressed > 0 and kvitPressed - (App.lastDt or 0.016) or 0
-  love.graphics.setColor(kvitPressed > 0 and { 0.9, 0.9, 0.85 } or { 0.75, 0.75, 0.7 })
-  love.graphics.circle('fill', 1400, 292, 24)
-  love.graphics.setColor(Theme.edgeLo)
-  love.graphics.circle('line', 1400, 292, 24)
-  love.graphics.setColor(0.1, 0.1, 0.1)
-  love.graphics.setFont(Theme.getFont(11))
-  local kw = love.graphics.getFont():getWidth('КВИТ')
-  love.graphics.print('КВИТ', 1400 - kw / 2, 287)
-  if hitbox(1376, 268, 48, 48) and W.mouse.pressed then
+local function drawPanelCore()
+  local L = WEB.L.panelCore
+  drawPanelBox(L[1], L[2], L[3], L[4], 'РАЗРЕЗ АКТИВНОЙ ЗОНЫ', '堆芯轴向剖面')
+  local c = WEB.L.coreCanvas
+  love.graphics.push('all')
+  love.graphics.setScissor(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
+  R2.drawCore(c[1], c[2], c[3], c[4], S)
+  love.graphics.pop()
+  local ro = {
+    { 'ОЗР', '操作裕度', tostring(S.opr), 'ст.', S.opr < 15 and WEB.dialNeedle or WEB.ink },
+    { 'Xe-135', '氙浓度', string.format('%.2f', S.xe), 'отн.', WEB.ink },
+    { 'α', '空泡', tostring(math.floor(S.voidFrac + 0.5)), '%', WEB.ink } }
+  local cw = 84
+  for i, r in ipairs(ro) do
+    readoutCard(L[1] + 14 + (i - 1) * (cw + 8), L[2] + L[4] - 66, cw, 52, r[1], r[2], r[3], r[4], r[5])
+  end
+end
+
+local function drawPanelRods()
+  local L = WEB.L.panelRods
+  drawPanelBox(L[1], L[2], L[3], L[4], 'ПОЛОЖЕНИЕ СТЕРЖНЕЙ', '控制棒棒位')
+  local c = WEB.L.rodsCanvas
+  love.graphics.push('all')
+  love.graphics.setScissor(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
+  R2.drawRods(c[1], c[2], c[3], c[4], S)
+  love.graphics.pop()
+  local moving = math.abs(S.rodTarget - S.rodPos) > 0.5
+  local ro = {
+    { 'СРЕДНЕЕ', '平均棒位', tostring(math.floor(S.rodPos + 0.5)), '%', WEB.ink },
+    { 'ВВЕРХ', '提升中', (moving and S.rodTarget > S.rodPos) and '▲' or '0', '', WEB.ink },
+    { 'ВНИЗ', '下插中', ((moving and S.rodTarget < S.rodPos) or S.scramming) and '▼' or '0', '', WEB.ink },
+  }
+  local cw = 78
+  for i, r in ipairs(ro) do
+    readoutCard(L[1] + 10 + (i - 1) * (cw + 6), L[2] + L[4] - 66, cw, 52, r[1], r[2], r[3], r[4], r[5])
+  end
+end
+
+local function drawPanelReactivity()
+  local L = WEB.L.panelReactivity
+  drawPanelBox(L[1], L[2], L[3], L[4], 'БАЛАНС РЕАКТИВНОСТИ', '反应性平衡')
+  local rc = WEB.L.rhoCanvas
+  R2.drawRho(rc[1], rc[2], rc[3], rc[4], S)
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('display', 12))
+  local ru = 'РЕГИСТРАТОР'
+  local rw = spacedWidth(ru, 2)
+  drawSpaced(ru, L[1] + L[3] / 2 - rw / 2, L[2] + 244, 2)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 9))
+  local cn = '纸带记录仪'
+  love.graphics.print(cn, L[1] + L[3] / 2 - love.graphics.getFont():getWidth(cn) / 2, L[2] + 260)
+  local ch = WEB.L.chartCanvas
+  love.graphics.push('all')
+  love.graphics.setScissor(L[1] + 2, L[2] + 2, L[3] - 4, L[4] - 4)
+  R2.drawChart(ch[1], ch[2], ch[3], ch[4], S)
+  love.graphics.pop()
+  love.graphics.setFont(WEB.getFont('mono', 10))
+  local legend = { { 'N(t)', { 0.690, 0.125, 0.063 } }, { 'T', { 0.102, 0.290, 0.604 } },
+    { 'Xe', { 0.416, 0.165, 0.541 } }, { 'ρ', { 0.102, 0.102, 0.102 } } }
+  local lx = L[1] + L[3] / 2 - 60
+  for _, lg in ipairs(legend) do
+    love.graphics.setColor(lg[2])
+    love.graphics.rectangle('fill', lx, L[2] + 262, 8, 8)
+    love.graphics.setColor(WEB.inkSoft)
+    love.graphics.print(lg[1], lx + 10, L[2] + 260)
+    lx = lx + 34
+  end
+end
+
+local function drawPanelAz()
+  local L = WEB.L.panelAz
+  drawPanelBox(L[1], L[2], L[3], L[4], 'АВАРИЙНАЯ ЗАЩИТА', '紧急保护')
+  local az = WEB.L.azCover
+  local shakeX = azCoverShake > 0 and math.sin(love.timer.getTime() * 40) * 4 or 0
+  azCoverShake = math.max(0, azCoverShake - 0.016)
+  vgrad(az[1] + shakeX, az[2], az[3], az[4], { 0.216, 0.200, 0.165 }, { 0.149, 0.141, 0.122 }, 3)
+  love.graphics.setColor({ 0.102, 0.094, 0.078 })
+  love.graphics.setLineWidth(2)
+  love.graphics.rectangle('line', az[1] + shakeX, az[2], az[3], az[4], 6)
+  local bcx, bcy, br = az[1] + az[3] / 2 + shakeX, az[2] + az[4] / 2, 38
+  radialCircle(bcx, bcy, br, WEB.btnRedHi, WEB.btnRed)
+  love.graphics.setColor({ 0.588, 0.078, 0.039 })
+  love.graphics.setLineWidth(2)
+  love.graphics.circle('line', bcx, bcy, br)
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.setFont(WEB.getFont('display', 16))
+  love.graphics.print('АЗ-5', bcx - love.graphics.getFont():getWidth('АЗ-5') / 2, bcy - 10)
+  if not azCoverOpen then
+    love.graphics.setColor(1, 1, 1, 0.14)
+    love.graphics.rectangle('fill', az[1] + shakeX + 4, az[2] + 4, az[3] - 8, az[4] - 8, 4)
+    love.graphics.setColor(1, 1, 1, 0.35)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle('line', az[1] + shakeX + 4, az[2] + 4, az[3] - 8, az[4] - 8, 4)
+  else
+    love.graphics.setColor(1, 1, 1, 0.04)
+    love.graphics.rectangle('fill', az[1] + shakeX + 4, az[2] - 6, az[3] - 8, 8, 4)
+  end
+  addHit(az[1], az[2], az[3], az[4], function()
+    azCoverOpen = not azCoverOpen
+    local okA, Audio = pcall(require, 'src.audio.synth')
+    if okA and Audio.click then Audio.click() end
+  end)
+  love.graphics.setColor(azCoverOpen and WEB.amber or WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('mono', 8))
+  local st = azCoverOpen and 'КОЛПАК ПОДНЯТ · 玻璃罩已开' or 'КОЛПАК ЗАКРЫТ · 点击玻璃打开'
+  love.graphics.print(st, L[1] + 10, az[2] + az[4] + 4)
+  local sy = az[2] + az[4] + 18
+  for i = 0, 9 do
+    love.graphics.setColor(i % 2 == 0 and { 0.831, 0.643, 0.094 } or WEB.btnBlack)
+    love.graphics.polygon('fill', L[1] + 24 + i * 20, sy, L[1] + 44 + i * 20, sy,
+      L[1] + 34 + i * 20, sy + 10, L[1] + 14 + i * 20, sy + 10)
+  end
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('display', 11))
+  love.graphics.print('КНОПКА АЗ-5', L[1] + L[3] / 2 - 46, sy + 14)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 8))
+  love.graphics.print('全部控制棒下插', L[1] + L[3] / 2 - 42, sy + 30)
+  local ks = WEB.L.keySwitch
+  radialCircle(ks[1] + ks[3] / 2, ks[2] + ks[4] / 2, 28,
+    { 0.847, 0.824, 0.753 }, { 0.596, 0.580, 0.518 })
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setLineWidth(1)
+  love.graphics.circle('line', ks[1] + ks[3] / 2, ks[2] + ks[4] / 2, 28)
+  love.graphics.setColor(WEB.btnBlack)
+  love.graphics.rectangle('fill', ks[1] + 20, ks[2] + ks[4] / 2 - 4, 16, 8, 2)
+  love.graphics.setColor(S.azBlocked and WEB.dialNeedle or { 0.847, 0.824, 0.753 })
+  love.graphics.rectangle('fill', ks[1] + 24, ks[2] + (S.azBlocked and 6 or 16), 8, 14, 2)
+  addHit(ks[1], ks[2], ks[3], ks[4], function() Engine.toggleKey() end)
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('display', 10))
+  love.graphics.print('БЛОКИРОВКА АЗ', ks[1] + ks[3] / 2 - 44, ks[2] + ks[4] + 4)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 8))
+  love.graphics.print('保护闭锁钥匙', ks[1] + ks[3] / 2 - 36, ks[2] + ks[4] + 18)
+end
+
+-- ==================== 下排面板 ====================
+
+local function drawPanelQuadrants()
+  local L = WEB.L.panelQuadrants
+  drawPanelBox(L[1], L[2], L[3], L[4], 'КВАДРАНТЫ', '象限功率')
+  local c = WEB.L.canvasQuadrants
+  R2.drawQuadrants(c[1], c[2], c[3], c[4], S)
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('sans', 10))
+  love.graphics.print('МОЩНОСТЬ КВАДРАНТОВ', L[1] + 16, L[2] + L[4] - 60)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 8))
+  love.graphics.print('象限功率分布', L[1] + 16, L[2] + L[4] - 46)
+end
+
+local function drawPanelSep()
+  local L = WEB.L.panelSep
+  drawPanelBox(L[1], L[2], L[3], L[4], 'СЕПАРАТОР', '汽水分离器')
+  local c = WEB.L.canvasSepLevel
+  R2.drawSepLevel(c[1], c[2], c[3], c[4], S, love.timer.getTime())
+  readoutCard(L[1] + 20, L[2] + 190, 100, 52, 'УРОВЕНЬ ДС', '分离器水位',
+    string.format('%.2f', S.separator_level), 'm', WEB.ink)
+  readoutCard(L[1] + 130, L[2] + 190, 100, 52, 'P ДС', '分离器压力',
+    string.format('%.1f', S.separator_pressure), 'MPa', WEB.ink)
+  love.graphics.setColor(WEB.amber)
+  love.graphics.setFont(WEB.getFont('mono', 10))
+  love.graphics.print(tostring(math.floor(S.decay_heat_power + 0.5)) .. ' MW',
+    L[1] + 20, L[2] + 258)
+end
+
+local function drawPanelRodDrive()
+  local L = WEB.L.panelRodDrive
+  drawPanelBox(L[1], L[2], L[3], L[4], 'ПРИВОД СТЕРЖНЕЙ', '棒驱动机构')
+  local c = WEB.L.canvasRodDrive
+  R2.drawRodDrive(c[1], c[2], c[3], c[4], S)
+end
+
+local function drawPanelRecorder()
+  local L = WEB.L.panelRecorder
+  drawPanelBox(L[1], L[2], L[3], L[4], 'КСУ-120', '自记记录仪')
+  local c = WEB.L.canvasRecorder
+  R2.drawRecorder(c[1], c[2], c[3], c[4], S)
+end
+
+local function drawPanelRadiation()
+  local L = WEB.L.panelRadiation
+  drawPanelBox(L[1], L[2], L[3], L[4], 'РАДИАЦИЯ', '辐射监测')
+  local dose = S.containment_dose_rate
+  readoutCard(L[1] + 12, L[2] + 50, 110, 52, 'ДОЗА', '剂量率',
+    dose >= 100 and tostring(math.floor(dose)) or
+    (dose >= 1 and string.format('%.1f', dose) or string.format('%.2f', dose)),
+    'mR/h', WEB.ink)
+  readoutCard(L[1] + 130, L[2] + 50, 110, 52, 'ОБ. ЦЕЛ.', '包壳',
+    tostring(math.floor(S.clad_integrity * 100 + 0.5)), '%', WEB.ink)
+  local ln = WEB.L.lampBankNew
+  local defs = {
+    { 'СЕП', '水位低', Instrument.lampState('SEP_LO') ~= 'OFF', WEB.lampAmber },
+    { 'СЕП', '水位高', Instrument.lampState('SEP_HI') ~= 'OFF', WEB.lampAmber },
+    { 'ПИТ', '给水低温', Instrument.lampState('FW_COLD') ~= 'OFF', { 0.910, 0.816, 0.251 } },
+    { 'ОБ.', '包壳损伤', Instrument.lampState('CLAD') ~= 'OFF', WEB.lampRed },
+    { 'ПЕР', '周期警', Instrument.lampState('PERIOD_W') ~= 'OFF', { 0.910, 0.816, 0.251 } },
+    { 'ПЕР', '周期危', Instrument.lampState('PERIOD_C') ~= 'OFF', WEB.lampRed },
+    { 'ТЕП', '衰变热', Instrument.lampState('DECAY') ~= 'OFF', WEB.lampAmber },
+    { 'РАД', '辐射高', Instrument.lampState('RAD') ~= 'OFF', WEB.lampRed },
+  }
+  local uw = ln[3] / 4
+  for i, def in ipairs(defs) do
+    local x = ln[1] + ((i - 1) % 4) * uw
+    local y = ln[2] + math.floor((i - 1) / 4) * 62
+    lampUnit(x, y, uw - 4, 58, def[1], def[2], def[3], def[4], false)
+  end
+  local kv = WEB.L.btnKvit
+  kvitPressed = math.max(0, kvitPressed - 0.016)
+  radialCircle(kv[1] + 24, kv[2] + 24, 24,
+    kvitPressed > 0 and { 1, 1, 1 } or WEB.dialFace,
+    kvitPressed > 0 and { 0.910, 0.894, 0.847 } or { 0.722, 0.706, 0.659 })
+  love.graphics.setColor({ 0.541, 0.518, 0.455 })
+  love.graphics.setLineWidth(2)
+  love.graphics.circle('line', kv[1] + 24, kv[2] + 24, 24)
+  love.graphics.setColor(WEB.ink)
+  love.graphics.setFont(WEB.getFont('display', 11))
+  love.graphics.print('КВИТ', kv[1] + 24 - love.graphics.getFont():getWidth('КВИТ') / 2, kv[2] + 17)
+  addHit(kv[1], kv[2], 48, 48, function()
     Instrument.kvit()
     kvitPressed = 0.2
     local okA, Audio = pcall(require, 'src.audio.synth')
     if okA and Audio.click then Audio.click() end
+  end)
+end
+
+-- ==================== 控制台 ====================
+
+local function drawConsoleDesk()
+  local D = WEB.L.consoleDesk
+  vgrad(D[1], D[2], D[3], D[4], WEB.deskTop, WEB.desk, 5)
+  love.graphics.setColor({ 0.361, 0.341, 0.290 })
+  love.graphics.rectangle('fill', D[1], D[2], D[3], 3)
+  love.graphics.setColor(1, 1, 1, 0.12)
+  love.graphics.rectangle('fill', D[1], D[2] + 3, D[3], 2)
+
+  local U = WEB.L.consoleUnits
+
+  -- ① 目标功率
+  do
+    local u = U[1]
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('ЗАДАННАЯ МОЩНОСТЬ', u[1] + 8, u[2] + 6)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print('目标功率 %', u[1] + 8, u[2] + 17)
+    local sx, sy, sw = u[1] + 10, u[2] + 36, u[3] - 24
+    love.graphics.setColor({ 0.227, 0.216, 0.180 })
+    love.graphics.rectangle('fill', sx, sy, sw, 8, 4)
+    love.graphics.setColor(WEB.inkSoft)
+    love.graphics.rectangle('line', sx, sy, sw, 8, 4)
+    local frac = S.targetPower / 120
+    love.graphics.setColor(0.5, 0.3, 0.1, 0.4)
+    love.graphics.rectangle('fill', sx, sy, sw * frac, 8, 4)
+    local knobX = sx + sw * frac
+    vgrad(knobX - 10, sy - 9, 20, 26, WEB.consoleText, WEB.panelEdge, 3)
+    love.graphics.setColor(WEB.inkSoft)
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle('line', knobX - 10, sy - 9, 20, 26, 3)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('mono', 8))
+    for i = 0, 4 do
+      love.graphics.print(tostring(i * 30), sx - 4 + (sw - 12) * i / 4, sy + 12)
+    end
+    love.graphics.setColor(WEB.btnBlack)
+    love.graphics.rectangle('fill', u[1] + 10, u[2] + 68, 76, 22, 2)
+    love.graphics.setColor(WEB.ledAmber)
+    love.graphics.setFont(WEB.getFont('mono', 12))
+    love.graphics.print(math.floor(S.targetPower + 0.5) .. ' %', u[1] + 18, u[2] + 71)
+    addHit(sx - 8, sy - 12, sw + 16, 34, nil)
+    hitRows[#hitRows].dragSlider = {
+      set = function(v) Engine.setTargetPower(v); if AppRef then AppRef.countOp() end end,
+      min = 0, max = 120, x = sx, w = sw }
   end
 
-  -- 日志条
-  W.label(1240, 330, 'ПЕЧАТЬ СОБЫТИЙ · 值班日志', 9, Theme.txtFaint)
-  local entries = App.logEntries
-  local lineH = 16
-  local maxLines = math.floor(300 / lineH)
-  local total = #entries
-  local contentH = total * lineH
-  if contentH > 300 then
-    if logScroll > contentH - 300 then logScroll = contentH - 300 end
-  else
-    logScroll = 0
+  -- ② 提棒速率 + 提插棒
+  do
+    local u = U[2]
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('СКОРОСТЬ ПОДЪЁМА', u[1] + 8, u[2] + 6)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print('提棒速率', u[1] + 8, u[2] + 17)
+    local speeds = { { 'МЕДЛ.', '慢', 0.1 }, { 'РАБОЧ.', '工', 0.4 }, { 'БЫСТР.', '快', 1.0 } }
+    for i, sp in ipairs(speeds) do
+      local bx = u[1] + 8 + (i - 1) * 68
+      rockerBtn(bx, u[2] + 30, 64, 26, sp[1], sp[2], math.abs(S.rodSpeed - sp[3]) < 0.01)
+      addHit(bx, u[2] + 30, 64, 26, function() Engine.setRodSpeed(sp[3]) end)
+    end
+    rockerBtn(u[1] + 8, u[2] + 62, 100, 26, 'ПОДЪЁМ', '提', false, rodHold > 0)
+    rockerBtn(u[1] + 112, u[2] + 62, 100, 26, 'ОПУСК', '降', false, rodHold < 0)
+    if hover(u[1] + 8, u[2] + 62, 100, 26) and W.mouse.pressed then
+      Engine.beginRodMove(1); rodHold = 1; if AppRef then AppRef.countOp() end
+    elseif hover(u[1] + 112, u[2] + 62, 100, 26) and W.mouse.pressed then
+      Engine.beginRodMove(-1); rodHold = -1; if AppRef then AppRef.countOp() end
+    elseif rodHold ~= 0 and not W.mouse.down then
+      Engine.endRodMove(); rodHold = 0
+    end
+    ledReadout(u[1] + 8, u[2] + 92, string.format('%.1f %%/с', S.rodSpeed))
   end
-  local startIdx = math.max(1, total - maxLines + 1 - math.floor(logScroll / lineH))
+
+  -- ③ 运行模式
+  do
+    local u = U[3]
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('РЕЖИМ', u[1] + 8, u[2] + 6)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print('运行模式', u[1] + 8, u[2] + 17)
+    rockerBtn(u[1] + 8, u[2] + 30, 62, 26, 'АВТО', '自', S.mode == 'auto')
+    rockerBtn(u[1] + 74, u[2] + 30, 62, 26, 'РУЧН.', '手', S.mode == 'manual')
+    addHit(u[1] + 8, u[2] + 30, 62, 26, function()
+      if S.mode ~= 'auto' then Engine.setMode('auto'); if AppRef then AppRef.countOp() end end
+    end)
+    addHit(u[1] + 74, u[2] + 30, 62, 26, function()
+      if S.mode ~= 'manual' then Engine.setMode('manual'); if AppRef then AppRef.countOp() end end
+    end)
+    ledReadout(u[1] + 8, u[2] + 66, S.mode == 'auto' and '自动' or '手动')
+  end
+
+  -- ④ ГЦН
+  do
+    local u = U[4]
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('ГЦН', u[1] + 8, u[2] + 6)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print('主循环泵', u[1] + 40, u[2] + 6)
+    for i = 1, 8 do
+      local bx = u[1] + 8 + (i - 1) * 30
+      local by = u[2] + 30
+      if S.pumps[i] then
+        radialCircle(bx + 13, by + 13, 13, { 0.353, 0.753, 0.416 }, WEB.lampGreen)
+      else
+        radialCircle(bx + 13, by + 13, 13, { 0.431, 0.416, 0.361 }, { 0.227, 0.216, 0.180 })
+      end
+      love.graphics.setColor({ 0.227, 0.216, 0.180 })
+      love.graphics.setLineWidth(2)
+      love.graphics.circle('line', bx + 13, by + 13, 13)
+      love.graphics.setColor(WEB.consoleText)
+      love.graphics.setFont(WEB.getFont('mono', 9))
+      love.graphics.print(tostring(i), bx + 9, by + 7)
+      love.graphics.setColor(WEB.screw)
+      love.graphics.setLineWidth(2)
+      love.graphics.line(bx + 1, by + 26, bx + 25, by + 26)
+      addHit(bx, by, 26, 26, function()
+        local wasOn = S.pumps[i]
+        Engine.togglePump(i)
+        if wasOn and AppRef and AppRef.stats then
+          AppRef.stats.pumpsStopped = AppRef.stats.pumpsStopped + 1
+        end
+        if AppRef then AppRef.countOp() end
+      end)
+    end
+    local onCount = 0
+    for i = 1, 8 do if S.pumps[i] then onCount = onCount + 1 end end
+    ledReadout(u[1] + 8, u[2] + 66, onCount .. '/8 · ' .. math.floor(S.flow) .. '%')
+  end
+
+  -- ⑤ 量程
+  do
+    local u = U[5]
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('ДИАПАЗОН КИП', u[1] + 8, u[2] + 6)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print('量程切换', u[1] + 8, u[2] + 17)
+    local names = { 'С', 'П', '1', '2', '3' }
+    local cur = Instrument.currentRangeId()
+    for i, nm in ipairs(names) do
+      local bx = u[1] + 8 + (i - 1) * 32
+      rockerBtn(bx, u[2] + 30, 28, 26, nm, nil, cur == i - 1)
+      addHit(bx, u[2] + 30, 28, 26, function()
+        if cur ~= i - 1 then
+          Instrument.switchRange(i - 1)
+          if AppRef then
+            AppRef.logEvent('info', '切换功率量程至 [' .. Instrument.rangeName() .. ']')
+            AppRef.countOp()
+          end
+        end
+      end)
+    end
+    ledReadout(u[1] + 8, u[2] + 66, Instrument.rangeName())
+  end
+
+  -- ⑥ 时间
+  do
+    local u = U[6]
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('ВРЕМЯ', u[1] + 8, u[2] + 6)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('cn', 8))
+    love.graphics.print('仿真时间', u[1] + 8, u[2] + 17)
+    local opts = { 1, 10, 60, 300 }
+    for i, ts in ipairs(opts) do
+      local bx = u[1] + 8 + (i - 1) * 40
+      rockerBtn(bx, u[2] + 30, 36, 26, '×' .. ts, nil, S.timeScale == ts)
+      addHit(bx, u[2] + 30, 36, 26, function()
+        Engine.setTimeScale(ts)
+        if AppRef and AppRef.endless then
+          local okE, Endless = pcall(require, 'src.endless')
+          if okE and Endless.setSpeed then Endless.setSpeed(ts) end
+        end
+      end)
+    end
+    local function p2(n)
+      n = math.floor(n)
+      if n < 10 then return '0' .. n end
+      return tostring(n)
+    end
+    ledReadout(u[1] + 8, u[2] + 66,
+      p2((S.t / 3600) % 24) .. ':' .. p2((S.t / 60) % 60) .. ':' .. p2(S.t % 60))
+  end
+end
+
+-- ==================== 日志纸片 / 道具条 ====================
+
+local function drawMachineLog()
+  local L = WEB.L.machineLog
+  love.graphics.setColor(WEB.logPaper)
+  love.graphics.rectangle('fill', L[1], L[2], L[3], L[4], 2)
+  love.graphics.setColor({ 0.784, 0.761, 0.682 })
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle('line', L[1], L[2], L[3], L[4], 2)
+  love.graphics.setColor(WEB.inkFaint)
+  love.graphics.setFont(WEB.getFont('cn', 8))
+  love.graphics.print('ПЕЧАТЬ СОБЫТИЙ · 事件记录', L[1] + 6, L[2] + 4)
+  love.graphics.setColor(WEB.btnBlack)
+  love.graphics.rectangle('fill', L[1] + L[3] - 54, L[2] + 3, 50, 16, 2)
+  love.graphics.setColor(WEB.consoleText)
+  love.graphics.setFont(WEB.getFont('cn', 8))
+  love.graphics.print('⤢ 放大', L[1] + L[3] - 50, L[2] + 5)
+  addHit(L[1] + L[3] - 54, L[2] + 3, 50, 16, function()
+    logZoomOpen = not logZoomOpen
+    local okA, Audio = pcall(require, 'src.audio.synth')
+    if okA and Audio.zoom then Audio.zoom() end
+  end)
   love.graphics.push('all')
-  love.graphics.setScissor(1240, 348, 328, 300)
-  local y = 348
+  love.graphics.setScissor(L[1] + 2, L[2] + 22, L[3] - 4, L[4] - 24)
+  local entries = AppRef and AppRef.logEntries or {}
+  local lineH = 13
+  local maxLines = math.floor((L[4] - 26) / lineH)
+  local total = #entries
+  local startIdx = math.max(1, total - maxLines - math.floor(logScroll / lineH) + 1)
+  local y = L[2] + 24
+  love.graphics.setFont(WEB.fontFor('mono', '[00:00:00]', 9))
   for i = startIdx, total do
-    if y > 648 then break end
     local e = entries[i]
-    local c = e.typ == 'alarm' and Theme.red or e.typ == 'warn' and Theme.amber or Theme.cyan
-    love.graphics.setColor(c)
-    love.graphics.setFont(Theme.getFont(9))
-    love.graphics.print(e.line, 1240, y)
+    love.graphics.setColor(e.typ == 'alarm' and WEB.logAlarm
+      or e.typ == 'warn' and WEB.logWarn or WEB.logInk)
+    love.graphics.print(e.line, L[1] + 6, y)
+    love.graphics.setColor(0.867, 0.839, 0.761)
+    love.graphics.line(L[1] + 6, y + lineH - 2, L[1] + L[3] - 6, y + lineH - 2)
     y = y + lineH
+    if y > L[2] + L[4] - 4 then break end
   end
   love.graphics.pop()
 end
 
--- ==================== 顶栏与 story/endless HUD ====================
-
-local function drawTopBar(App)
-  local S = Engine.S
-  love.graphics.setColor(Theme.panel)
-  love.graphics.rectangle('fill', 0, 0, 1600, 48)
-  love.graphics.setColor(Theme.edgeLo)
-  love.graphics.line(0, 48, 1600, 48)
-
-  love.graphics.setColor(Theme.amber)
-  love.graphics.setFont(Theme.getFont(16))
-  love.graphics.print('ЩИТ · РБМК-1000 БЛОК №4', 16, 12)
-  love.graphics.setColor(Theme.txtFaint)
-  love.graphics.setFont(Theme.getFont(9))
-  love.graphics.print(App.mode == 'free' and 'СВОБОДНАЯ СМЕНА · 自由操作'
-    or (App.mode == 'story' and 'ХРОНИКА · 历史重演')
-    or (App.mode == 'endless' and 'БЕСКОНЕЧНОСТЬ · 无尽运营')
-    or 'ВЫЗОВ · 挑战模式', 16, 32)
-
-  -- 时钟
-  love.graphics.setColor(Theme.txt)
-  love.graphics.setFont(Theme.getFont(14))
-  local clk = formatClock(S.t)
-  love.graphics.print(clk, 1470, 10)
-  love.graphics.setColor(Theme.cyan)
-  love.graphics.setFont(Theme.getFont(9))
-  love.graphics.print('×' .. S.timeScale, 1500, 30)
-  W.label(1350, 14, 'Esc 暂停 · F12 结束值班', 9, Theme.txtFaint)
-
-  -- story HUD（幕次 + 任务）
-  if App.mode == 'story' and story.act then
-    love.graphics.setColor(Theme.panel2)
-    love.graphics.rectangle('fill', 420, 6, 200, 36, 4)
-    love.graphics.setColor(Theme.amber)
-    love.graphics.setFont(Theme.getFont(12))
-    love.graphics.print(story.actRu, 432, 10)
-    love.graphics.setColor(Theme.txt)
-    love.graphics.setFont(Theme.getFont(10))
-    love.graphics.print(story.actCn, 432, 26)
-    if story.obj ~= '' then
-      local txt = story.obj
-      love.graphics.setColor(story.objDone and Theme.green or Theme.cyan)
-      love.graphics.setFont(Theme.getFont(10))
-      love.graphics.print((story.objDone and '✓ ' or '◈ ') .. txt, 640, 18)
-    end
+local function drawLogZoom()
+  love.graphics.setColor(0, 0, 0, 0.6)
+  love.graphics.rectangle('fill', 0, 0, 1600, 900)
+  local w, h = 900, 640
+  local x, y = 800 - w / 2, 450 - h / 2
+  love.graphics.setColor(WEB.logPaper)
+  love.graphics.rectangle('fill', x, y, w, h, 4)
+  love.graphics.setColor(WEB.engraved)
+  love.graphics.setFont(WEB.getFont('cn', 11))
+  love.graphics.print('ПЕЧАТЬ СОБЫТИЙ · ПОЛНЫЙ ЖУРНАЛ 事件记录 · 全量', x + 16, y + 10)
+  love.graphics.setColor(WEB.btnBlack)
+  love.graphics.rectangle('fill', x + w - 40, y + 8, 28, 24, 2)
+  love.graphics.setColor(WEB.consoleText)
+  love.graphics.print('✕', x + w - 32, y + 10)
+  addHit(x + w - 40, y + 8, 28, 24, function() logZoomOpen = false end)
+  love.graphics.push('all')
+  love.graphics.setScissor(x + 8, y + 36, w - 16, h - 44)
+  local entries = AppRef and AppRef.logEntries or {}
+  local lineH = 18
+  local yOff = 0
+  love.graphics.setFont(WEB.fontFor('mono', '[00:00:00]', 10))
+  for i = math.max(1, #entries - 60), #entries do
+    local e = entries[i]
+    love.graphics.setColor(e.typ == 'alarm' and WEB.logAlarm
+      or e.typ == 'warn' and WEB.logWarn or WEB.logInk)
+    love.graphics.print(e.line, x + 16, y + 40 + yOff - logScroll)
+    yOff = yOff + lineH
   end
+  love.graphics.pop()
+end
 
-  -- endless HUD
-  if App.mode == 'endless' and endlessHudVisible and App.endless then
-    local okE, Endless = pcall(require, 'src.endless')
-    if okE and Endless.getHud then
-      local h = Endless.getHud()
-      if h then
-        love.graphics.setColor(Theme.panel2)
-        love.graphics.rectangle('fill', 420, 6, 560, 36, 4)
-        love.graphics.setColor(Theme.amber)
-        love.graphics.setFont(Theme.getFont(11))
-        love.graphics.print('МЕСЯЦ ' .. h.month .. ' · ' .. h.dateStr .. ' · 班次 ' .. h.shift, 432, 10)
-        love.graphics.setColor(Theme.txt)
-        love.graphics.setFont(Theme.getFont(10))
-        love.graphics.print(string.format('₽ %s · 燃耗 %.1f/40 · 士气 %d%%',
-          tostring(h.money), h.burnup, h.crewMorale), 432, 26)
+local function drawDeskProps()
+  local D = WEB.L.deskProps
+  vgrad(D[1], D[2], D[3], D[4], WEB.desk, WEB.floor, 3)
+  local icons = {
+    { id = 'manual', icon = '规', name = '运行规程', ru = 'РЕГЛАМЕНТ' },
+    { id = 'clipboard', icon = '志', name = '值班日志', ru = 'ЖУРНАЛ' },
+    { id = 'calculator', icon = '算', name = '计算器', ru = 'МК-61' },
+    { id = 'dosimeter', icon = '量', name = '剂量计', ru = 'ДП-5' },
+    { id = 'phone', icon = '话', name = '高频电话', ru = 'ВЧ' },
+    { id = 'phonebook', icon = '簿', name = '电话号码簿', ru = 'ТЕЛ.КНИГА' },
+    { id = 'coffee', icon = '茶', name = '茶炊', ru = 'ЧАЙ' },
+    { id = 'about', icon = '关', name = '关于', ru = 'О ПРОГРАММЕ' },
+  }
+  local x0 = WEB.L.propsX0
+  for i, p in ipairs(icons) do
+    local x = x0 + (i - 1) * 82
+    local y = D[2] + 8
+    local hov = hover(x, y, WEB.L.propSize[1], WEB.L.propSize[2])
+    local lift = hov and -4 or 0
+    vgrad(x, y + lift, WEB.L.propSize[1], WEB.L.propSize[2],
+      { 0.604, 0.580, 0.518 }, { 0.478, 0.459, 0.408 }, 3)
+    love.graphics.setColor(WEB.inkSoft)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle('line', x, y + lift, WEB.L.propSize[1], WEB.L.propSize[2], 4)
+    love.graphics.setFont(WEB.getFont('cn', 17))
+    local iw = love.graphics.getFont():getWidth(p.icon)
+    love.graphics.print(p.icon, x + WEB.L.propSize[1] / 2 - iw / 2, y + lift + 6)
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('cn', 9))
+    local nw = love.graphics.getFont():getWidth(p.name)
+    love.graphics.print(p.name, x + WEB.L.propSize[1] / 2 - nw / 2, y + lift + 34)
+    love.graphics.setColor(WEB.consoleDim)
+    love.graphics.setFont(WEB.getFont('sans', 7))
+    local rw = love.graphics.getFont():getWidth(p.ru)
+    love.graphics.print(p.ru, x + WEB.L.propSize[1] / 2 - rw / 2, y + lift + 48)
+    addHit(x, y, WEB.L.propSize[1], WEB.L.propSize[2], function()
+      if p.id == 'about' then
+        if AppRef and AppRef.showAbout then AppRef.showAbout() end
+      else
+        local Props = require('src.props')
+        Props.openProp(p.id)
       end
-    end
+    end)
+  end
+  local vs = WEB.L.versionStamp
+  love.graphics.setColor(WEB.consoleDim)
+  love.graphics.setFont(WEB.getFont('mono', 8))
+  love.graphics.print('v0.1.0', vs[1], vs[2])
+  love.graphics.print('сб.2026.11.14', vs[1], vs[2] + 13)
+  love.graphics.print('РЭ-86/16', vs[1], vs[2] + 26)
+end
+
+-- ==================== story / endless HUD ====================
+
+local function drawStoryHud()
+  if not story.act then return end
+  local L = WEB.L.storyHud
+  love.graphics.setColor(0.047, 0.055, 0.047, 0.82)
+  love.graphics.rectangle('fill', L[1], L[2], L[3], L[4], 4)
+  love.graphics.setColor(0.839, 0.710, 0.376, 0.45)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle('line', L[1], L[2], L[3], L[4], 4)
+  love.graphics.setColor(0.839, 0.710, 0.376)
+  love.graphics.rectangle('fill', L[1], L[2], 4, L[4])
+  love.graphics.setColor(WEB.amber)
+  love.graphics.setFont(WEB.getFont('display', 13))
+  love.graphics.print(story.actRu, L[1] + 14, L[2] + 3)
+  love.graphics.setColor(WEB.consoleText)
+  love.graphics.setFont(WEB.getFont('cn', 10))
+  love.graphics.print(story.actCn, L[1] + 90, L[2] + 6)
+  if story.obj ~= '' then
+    love.graphics.setColor(story.objDone and { 0.180, 0.620, 0.267 } or WEB.consoleText)
+    love.graphics.setFont(WEB.fontFor('cn', story.obj, 11))
+    love.graphics.print((story.objDone and '✓ ' or '') .. story.obj, L[1] + 190, L[2] + 9)
+  end
+  local okP, Props = pcall(require, 'src.props')
+  if okP then
+    local bx, by = 1496, 160
+    love.graphics.setColor(0.047, 0.055, 0.047, 0.85)
+    love.graphics.rectangle('fill', bx, by, 96, 46, 4)
+    love.graphics.setColor(0.839, 0.710, 0.376, 0.5)
+    love.graphics.rectangle('line', bx, by, 96, 46, 4)
+    love.graphics.setColor(WEB.consoleText)
+    love.graphics.setFont(WEB.getFont('sans', 9))
+    love.graphics.print('КАЛЕНДАРЬ', bx + 10, by + 6)
+    love.graphics.setFont(WEB.getFont('cn', 9))
+    love.graphics.print('📅 日历', bx + 10, by + 22)
+    addHit(bx, by, 96, 46, function()
+      local modeKey = (AppRef and AppRef.mode == 'endless') and 'endless' or 'story'
+      Props.toggleCalendar(modeKey)
+    end)
   end
 end
 
--- ==================== 浮层：电话/对话 ====================
-
-local function rgba(c, a)
-  return { c[1], c[2], c[3], a }
+local function drawEndlessHud()
+  if not endlessHudVisible or not AppRef or not AppRef.endless then return end
+  local okE, Endless = pcall(require, 'src.endless')
+  if not okE or not Endless.getHud then return end
+  local h = Endless.getHud()
+  if not h then return end
+  local x, y = 440, 0
+  love.graphics.setColor(0.047, 0.055, 0.047, 0.82)
+  love.graphics.rectangle('fill', x, y, 560, 64, 4)
+  love.graphics.setColor(0.839, 0.710, 0.376, 0.45)
+  love.graphics.rectangle('line', x, y, 560, 64, 4)
+  love.graphics.setColor(WEB.amber)
+  love.graphics.setFont(WEB.getFont('sans', 11))
+  love.graphics.print('МЕСЯЦ ' .. h.month, x + 12, y + 4)
+  love.graphics.setColor(WEB.consoleText)
+  love.graphics.setFont(WEB.getFont('cn', 10))
+  love.graphics.print('第' .. h.month .. '月 · 第' .. h.day .. '天 · 班次 ' .. h.shift, x + 90, y + 6)
+  love.graphics.setFont(WEB.getFont('mono', 13))
+  love.graphics.print('₽ ' .. tostring(h.money), x + 12, y + 34)
+  love.graphics.setFont(WEB.getFont('cn', 10))
+  love.graphics.print('燃耗 ' .. string.format('%.1f', h.burnup), x + 180, y + 37)
+  local opts = { 1, 4, 10, 60, 240 }
+  for i, ts in ipairs(opts) do
+    local bx = x + 290 + (i - 1) * 44
+    rockerBtn(bx, y + 8, 40, 22, '×' .. ts, nil, S.timeScale == ts)
+    addHit(bx, y + 8, 40, 22, function() Endless.setSpeed(ts) end)
+  end
+  local actions = { { 'save', '存档' }, { 'crew', '班组' }, { 'goals', '目标' }, { 'ach', '成就' } }
+  for i, a in ipairs(actions) do
+    local bx = x + 290 + (i - 1) * 62
+    rockerBtn(bx, y + 34, 58, 22, a[2], nil, false)
+    addHit(bx, y + 34, 58, 22, function()
+      if a[1] == 'save' then
+        Endless.saveGame()
+        if AppRef then AppRef.logEvent('info', '已保存进度。') end
+      else
+        Hud.showEndlessPanelKind(a[1])
+      end
+    end)
+  end
 end
+
+function Hud.showEndlessPanelKind(kind)
+  local okE, Endless = pcall(require, 'src.endless')
+  if not okE then return end
+  if kind == 'crew' then
+    local crew = Endless.getCrew()
+    local ov = Endless.getOverview()
+    local lines = { '工作班组 · СМЕНА（能力影响事件处理，士气低于 55% 有误操作风险）' }
+    for _, m in ipairs(crew) do
+      lines[#lines + 1] = m.name .. ' · ' .. m.role .. '  能 ' ..
+        math.floor(m.competence * 100 + 0.5) .. '%  士 ' .. math.floor(m.morale * 100 + 0.5) .. '%'
+    end
+    if ov then
+      lines[#lines + 1] = '平均能力 ' .. math.floor(ov.avgComp * 100 + 0.5) ..
+        '% · 平均士气 ' .. math.floor(ov.avgMorale * 100 + 0.5) .. '%'
+    end
+    panel = { kind = 'list', title = 'СМЕНА · 班组', lines = lines }
+  elseif kind == 'goals' then
+    local lines = {}
+    for _, g in ipairs(Endless.getGoals()) do
+      lines[#lines + 1] = (g.done and '✓ ' or '○ ') .. g.text .. '  ₽' .. tostring(g.reward)
+    end
+    panel = { kind = 'list', title = 'ЦЕЛИ · 经营目标', lines = lines }
+  elseif kind == 'ach' then
+    local lines = {}
+    for _, a in ipairs(Endless.getAchList()) do
+      lines[#lines + 1] = (a.unlocked and '✓ ' or '○ ') .. a.text
+    end
+    panel = { kind = 'list', title = 'НАГРАДЫ · 成就', lines = lines }
+  end
+  if panel then
+    panel.kind = 'list'
+    if panelOpenCb then panelOpenCb() end
+  end
+end
+
+-- ==================== 浮层 / 演出 / 面板 ====================
 
 local function drawFloat(f)
-  local w, h = 560, 120
+  local w, h = 560, 110
   local x = 800 - w / 2
-  local y = 900 - h - 110
+  local y = 900 - h - 130
   local a = math.min(1, f.timer * 5)
-  love.graphics.setColor(0.05, 0.06, 0.05, 0.92 * a)
-  love.graphics.rectangle('fill', x, y, w, h, 8)
-  love.graphics.setColor(rgba(f.kind == 'phone' and Theme.amber or Theme.cyan, 0.9 * a))
+  love.graphics.setColor(0.047, 0.055, 0.047, 0.82 * a)
+  love.graphics.rectangle('fill', x, y, w, h, 4)
+  love.graphics.setColor(0.839, 0.710, 0.376, 0.45 * a)
   love.graphics.setLineWidth(1)
-  love.graphics.rectangle('line', x, y, w, h, 8)
-  love.graphics.setFont(Theme.getFont(9))
-  love.graphics.setColor(rgba(Theme.txtFaint, a))
+  love.graphics.rectangle('line', x, y, w, h, 4)
+  love.graphics.setColor(0.839, 0.710, 0.376)
+  love.graphics.rectangle('fill', x, y, 4, h)
+  love.graphics.setFont(WEB.getFont('cn', 9))
+  love.graphics.setColor(WEB.consoleDim, a)
   love.graphics.print(f.kind == 'phone' and '☎ ВЧ 电话 · 高频电话' or 'Вызов · 对话', x + 16, y + 8)
-  love.graphics.setFont(Theme.getFont(12))
-  love.graphics.setColor(rgba(Theme.amber, a))
+  love.graphics.setFont(WEB.getFont('cn', 13))
+  love.graphics.setColor(WEB.amber, a)
   love.graphics.print((f.data.from or f.data.speaker or ''):gsub('\n', ' '), x + 16, y + 26)
-  love.graphics.setFont(Theme.getFont(12))
-  love.graphics.setColor(rgba(Theme.txt, a))
-  love.graphics.print((f.data.text or ''):gsub('\n', ' '), x + 16, y + 50, w - 32, 'left')
-  love.graphics.setFont(Theme.getFont(9))
-  love.graphics.setColor(rgba(Theme.txtFaint, a))
-  love.graphics.print('⏎ 关闭', x + w - 60, y + h - 20)
+  love.graphics.setColor(WEB.consoleText, a)
+  love.graphics.print((f.data.text or ''):gsub('\n', ' '), x + 16, y + 54, w - 32)
+  love.graphics.setFont(WEB.getFont('cn', 9))
+  love.graphics.setColor(WEB.consoleDim, a)
+  love.graphics.print('⏎ 关闭', x + w - 60, y + h - 22)
 end
-
--- ==================== 演出：点火 / 熔毁 ====================
 
 local function drawIgnition(fx)
   local p = fx.t / fx.dur
-  love.graphics.setColor(0, 0, 0, math.min(1, p * 3))
+  love.graphics.setColor(0.008, 0.012, 0.02, math.min(1, p * 3))
   love.graphics.rectangle('fill', -50, -50, 1700, 1000)
-  -- 堆芯光核
   local glow = p < 0.5 and p * 2 or 1
   local r = 60 + p * 180
   love.graphics.setColor(0.4, 0.7, 1, 0.9 * glow)
@@ -657,7 +1025,6 @@ local function drawIgnition(fx)
   love.graphics.circle('fill', 800, 450, r * 0.32)
   love.graphics.setColor(1, 1, 1, 0.9 * glow)
   love.graphics.circle('fill', 800, 450, r * 0.14)
-  -- 冲击环
   for i = 1, 3 do
     local rp = ((p * 1.4 - (i - 1) * 0.18) % 1)
     if rp > 0 then
@@ -666,215 +1033,173 @@ local function drawIgnition(fx)
       love.graphics.circle('line', 800, 450, rp * 320)
     end
   end
-  love.graphics.setFont(Theme.getFont(26))
+  love.graphics.setFont(WEB.getFont('display', 26))
   love.graphics.setColor(1, 1, 1, glow)
-  local t1 = 'ПУСК'
-  love.graphics.print(t1, 800 - love.graphics.getFont():getWidth(t1) / 2, 700)
-  love.graphics.setFont(Theme.getFont(14))
-  love.graphics.setColor(rgba(Theme.cyan, glow))
+  love.graphics.print('ПУСК', 800 - love.graphics.getFont():getWidth('ПУСК') / 2, 700)
+  love.graphics.setFont(WEB.getFont('cn', 14))
+  love.graphics.setColor(0.31, 0.847, 0.878, glow)
   local t2 = '点火 · 反应堆临界'
   love.graphics.print(t2, 800 - love.graphics.getFont():getWidth(t2) / 2, 740)
 end
 
 local function drawMeltdownFx()
-  -- 红光渐入 + 震动
   local a = math.min(0.35, love.timer.getTime() % 2 * 0.2)
   love.graphics.setColor(1, 0.15, 0.1, a)
   love.graphics.rectangle('fill', -50, -50, 1700, 1000)
 end
 
--- ==================== 无尽面板（结算/事件，切片3 完善） ====================
-
--- App 状态联动（避免循环 require：app.boot 时注册）
-local panelOpenCb, panelCloseCb, bankruptCb = nil, nil, nil
-function Hud.setPanelCallbacks(onOpen, onClose, onBankrupt)
-  panelOpenCb = onOpen
-  panelCloseCb = onClose
-  bankruptCb = onBankrupt
-end
-
-function Hud.showEndlessSettle(d)
-  panel = {
-    kind = 'settle',
-    data = d,
-    buttons = {},
-  }
-  if panelOpenCb then panelOpenCb() end
-end
-
-function Hud.showEndlessEvent(evt, router)
-  panel = {
-    kind = 'event',
-    data = evt,
-    router = router,
-    buttons = {},
-  }
-  if panelOpenCb then panelOpenCb() end
-end
-
-function Hud.closeEndlessPanel()
-  panel = nil
-  if panelCloseCb then panelCloseCb() end
-end
-
-function Hud.endlessPanelOpen() return panel ~= nil end
-
 local function drawEndlessPanel()
-  local d = panel.data
+  local d = panel
   local pw, ph = 640, 460
   local px, py = 800 - pw / 2, 450 - ph / 2
-  love.graphics.setColor(0, 0, 0, 0.7)
+  love.graphics.setColor(0.118, 0.110, 0.086, 0.75)
   love.graphics.rectangle('fill', -50, -50, 1700, 1000)
-  love.graphics.setColor(Theme.panel2)
-  love.graphics.rectangle('fill', px, py, pw, ph, 8)
-  love.graphics.setColor(Theme.edge)
+  vgrad(px, py, pw, ph, WEB.panelFace, WEB.panelFace2, 4)
+  love.graphics.setColor(WEB.panelFrame)
   love.graphics.setLineWidth(2)
-  love.graphics.rectangle('line', px, py, pw, ph, 8)
-
-  panel.buttons = {}
+  love.graphics.rectangle('line', px + 1, py + 1, pw - 2, ph - 2, 6)
   local y = py + 24
-  if panel.kind == 'settle' then
-    W.labelCenter(px + pw / 2, y, '第 ' .. d.month .. ' 月结算', 18, Theme.amber); y = y + 22
-    W.labelCenter(px + pw / 2, y, 'МЕСЯЧНЫЙ РАСЧЁТ · 月度经济报表', 10, Theme.txtFaint); y = y + 34
+  if d.kind == 'settle' then
+    love.graphics.setColor(WEB.engraved)
+    love.graphics.setFont(WEB.getFont('cn', 18))
+    local t1 = '第 ' .. d.data.month .. ' 月结算'
+    love.graphics.print(t1, px + pw / 2 - love.graphics.getFont():getWidth(t1) / 2, y)
+    y = y + 34
     local function mrow(label, value, color)
-      W.label(px + 48, y, label, 12, Theme.txtDim)
-      local f = Theme.getFont(13)
-      W.label(px + pw - 48 - f:getWidth(value), y, value, 13, color or Theme.txt)
+      love.graphics.setColor(WEB.inkSoft)
+      love.graphics.setFont(WEB.getFont('cn', 12))
+      love.graphics.print(label, px + 48, y)
+      love.graphics.setFont(WEB.getFont('mono', 13))
+      love.graphics.setColor(color or WEB.ink)
+      love.graphics.print(value, px + pw - 48 - love.graphics.getFont():getWidth(value), y)
       y = y + 28
     end
-    mrow('售电收入', '+' .. tostring(math.floor(d.income + 0.5)) .. ' ₽', Theme.green)
-    mrow('日常维护', '-' .. tostring(math.floor(d.maint + 0.5)) .. ' ₽')
-    mrow('人员工资', '-' .. tostring(math.floor(d.wages + 0.5)) .. ' ₽')
-    mrow('事件 / 罚款', '-' .. tostring(math.floor(d.fines + 0.5)) .. ' ₽')
-    mrow('本月净利润: ', (d.profit >= 0 and '+' or '') .. tostring(math.floor(d.profit + 0.5)) .. ' ₽',
-      d.profit >= 0 and Theme.green or Theme.red)
-    y = y + 8
-    mrow('现金', tostring(math.floor(d.money + 0.5)) .. ' ₽' ..
-      (d.lossStreak > 0 and (' · 连续亏损 ' .. d.lossStreak .. '/6 月') or ' · 财务健康'))
-    if d.bankrupt then
-      W.label(px + 48, y, '连续 6 个月净亏损 — 电站被上级部门接管。您被罢职。', 11, Theme.red)
-      y = y + 40
-      if button(px + pw / 2 - 80, y, 160, 38, '最终结算', { danger = true }) then
+    mrow('售电收入', '+' .. tostring(math.floor(d.data.income + 0.5)) .. ' ₽', { 0.180, 0.620, 0.267 })
+    mrow('日常维护', '-' .. tostring(math.floor(d.data.maint + 0.5)) .. ' ₽')
+    mrow('人员工资', '-' .. tostring(math.floor(d.data.wages + 0.5)) .. ' ₽')
+    mrow('事件 / 罚款', '-' .. tostring(math.floor(d.data.fines + 0.5)) .. ' ₽')
+    mrow('本月净利润: ', (d.data.profit >= 0 and '+' or '') ..
+      tostring(math.floor(d.data.profit + 0.5)) .. ' ₽',
+      d.data.profit >= 0 and { 0.180, 0.620, 0.267 } or WEB.dialNeedle)
+    mrow('现金', tostring(math.floor(d.data.money + 0.5)) .. ' ₽' ..
+      (d.data.lossStreak > 0 and (' · 连续亏损 ' .. d.data.lossStreak .. '/6 月') or ''))
+    if d.data.bankrupt then
+      love.graphics.setColor(WEB.dialNeedle)
+      love.graphics.setFont(WEB.getFont('cn', 11))
+      love.graphics.print('连续 6 个月净亏损 — 电站被上级部门接管。您被罢职。', px + 48, y)
+      y = y + 46
+      if rockerBtnThen(px + pw / 2 - 80, y, 160, 38, '最终结算', true) then
         Hud.closeEndlessPanel()
         if bankruptCb then bankruptCb() end
       end
     else
-      if button(px + pw / 2 - 80, y + 16, 160, 38, '继续运营 · ⏎', {}) then
+      if rockerBtnThen(px + pw / 2 - 80, y + 16, 160, 38, '继续运营 · ⏎', false) then
         Hud.closeEndlessPanel()
       end
     end
-  elseif panel.kind == 'event' then
-    W.labelCenter(px + pw / 2, y, d.title or '事件', 16, Theme.amber); y = y + 36
-    W.textBlock(px + 48, y, pw - 96, d.desc or ''); y = y + 76
-    for _, opt in ipairs(d.options or {}) do
-      if button(px + 48, y, pw - 96, 40, opt.label, {}) then
-        if panel.router then
-          panel.router(d.id, opt.id)
+  elseif d.kind == 'event' then
+    love.graphics.setColor(WEB.engraved)
+    love.graphics.setFont(WEB.getFont('cn', 16))
+    local t1 = d.data.title or '事件'
+    love.graphics.print(t1, px + pw / 2 - love.graphics.getFont():getWidth(t1) / 2, y)
+    y = y + 40
+    love.graphics.setColor(WEB.inkSoft)
+    love.graphics.setFont(WEB.getFont('cn', 12))
+    love.graphics.printf(d.data.desc or '', px + 48, y, pw - 96)
+    y = y + 80
+    for _, opt in ipairs(d.data.options or {}) do
+      if rockerBtnThen(px + 48, y, pw - 96, 40, opt.label, false) then
+        if d.router then d.router(d.data.id, opt.id)
         else
           local okE, Endless = pcall(require, 'src.endless')
-          if okE and Endless.choose then Endless.choose(d.id, opt.id) end
+          if okE and Endless.choose then Endless.choose(d.data.id, opt.id) end
         end
         Hud.closeEndlessPanel()
         return
       end
       y = y + 48
     end
-    W.label(px + 48, py + ph - 36, '延迟不响应将按默认方式处理 · ⏎ 无默认跳过', 9, Theme.txtFaint)
+    love.graphics.setColor(WEB.inkFaint)
+    love.graphics.setFont(WEB.getFont('cn', 9))
+    love.graphics.print('延迟不响应将按默认方式处理', px + 48, py + ph - 36)
+  elseif d.kind == 'list' then
+    love.graphics.setColor(WEB.engraved)
+    love.graphics.setFont(WEB.getFont('cn', 16))
+    love.graphics.print(d.title, px + pw / 2 - love.graphics.getFont():getWidth(d.title) / 2, y)
+    y = y + 44
+    love.graphics.push('all')
+    love.graphics.setScissor(px + 24, y, pw - 48, py + ph - y - 50)
+    love.graphics.setFont(WEB.getFont('cn', 12))
+    love.graphics.setColor(WEB.ink)
+    for i, line in ipairs(d.lines or {}) do
+      love.graphics.print(line, px + 40, y + (i - 1) * 22)
+    end
+    love.graphics.pop()
+    if rockerBtnThen(px + pw / 2 - 80, py + ph - 54, 160, 36, '关闭 · ⏎', false) then
+      Hud.closeEndlessPanel()
+    end
   end
-end
-
-function Hud.endlessPanelMouse(x, y)
-  -- 按钮命中在 drawEndlessPanel 内通过 W.mouse 处理（IMM），此处仅阻止穿透
-end
-
--- ==================== story HUD 状态接口 ====================
-
-function Hud.storyAct(v)
-  story.act = v
-  local meta = {
-    ['1'] = { ru = 'АКТ I', cn = '第一幕 · 白班' },
-    ['2'] = { ru = 'АКТ II', cn = '第二幕 · 氙坑' },
-    ['2B'] = { ru = 'АКТ II-Б', cn = '第二幕B · 等待' },
-    ['3'] = { ru = 'АКТ III', cn = '第三幕 · 提棒' },
-    ['3B'] = { ru = 'АКТ III-Б', cn = '第三幕B · 重来' },
-    ['4'] = { ru = 'АКТ IV', cn = '第四幕 · 准备' },
-    ['5'] = { ru = 'АКТ V', cn = '第五幕 · 试验' },
-    ['6'] = { ru = 'АКТ VI', cn = '第六幕 · 灾后' },
-  }
-  local m = meta[tostring(v)] or { ru = 'АКТ', cn = '第·幕' }
-  story.actRu = m.ru
-  story.actCn = m.cn
-end
-
-function Hud.storyObjective(text)
-  story.obj = text or ''
-  story.objDone = false
-end
-
-function Hud.storyObjectiveDone()
-  story.objDone = true
-end
-
-function Hud.initStoryHud()
-  endlessHudVisible = false
-  if App and App.scenario then Hud.storyAct(App.scenario.flags.act or 1) end
-end
-
-function Hud.clearStoryHud()
-  story = { act = nil, actRu = '', actCn = '', obj = '', objDone = false }
-  endlessHudVisible = false
-end
-
-function Hud.showEndlessHud()
-  endlessHudVisible = true
-end
-
-function Hud.hideEndlessHud()
-  endlessHudVisible = false
 end
 
 -- ==================== 主绘制 ====================
 
 function Hud.draw(App)
   S = Engine.S
-  drawTopBar(App)
-  drawZone1(App)
-  drawZone2(App)
-  drawZone3(App)
-  drawZone4(App)
+  AppRef = App
+  hitRows = {}
+  drawRoom()
+  drawPlantSign()
+  drawClock()
+  drawPanelPower()
+  drawPanelCore()
+  drawPanelRods()
+  drawPanelReactivity()
+  drawPanelAz()
+  drawPanelQuadrants()
+  drawPanelSep()
+  drawPanelRodDrive()
+  drawPanelRecorder()
+  drawPanelRadiation()
+  drawConsoleDesk()
+  drawMachineLog()
+  drawStoryHud()
+  drawEndlessHud()
+  drawDeskProps()
 
-  -- 熔毁演出
-  if S.meltdown then
-    drawMeltdownFx()
+  if S.meltdown then drawMeltdownFx() end
+  if App.ignitionFx then drawIgnition(App.ignitionFx) end
+  if App.floatShowing then drawFloat(App.floatShowing) end
+  if panel then drawEndlessPanel() end
+  if logZoomOpen then drawLogZoom() end
+
+  if W.mouse.pressed then
+    for i = #hitRows, 1, -1 do
+      local hh = hitRows[i]
+      if hitbox(hh.x, hh.y, hh.w, hh.h) and hh.cb then hh.cb() break end
+    end
+    for _, hh in ipairs(hitRows) do
+      if hh.dragSlider and W.mouse.down then
+        local ds = hh.dragSlider
+        local mx = W.mouse.x
+        if mx >= ds.x - 10 and mx <= ds.x + ds.w + 10 then
+          local frac = math.max(0, math.min(1, (mx - ds.x) / ds.w))
+          ds.set(ds.min + frac * (ds.max - ds.min))
+        end
+      end
+    end
   end
-
-  -- 点火演出
-  if App.ignitionFx then
-    drawIgnition(App.ignitionFx)
-  end
-
-  -- 电话/对话浮层
-  if App.floatShowing then
-    drawFloat(App.floatShowing)
-  end
-
-  -- 无尽面板
-  if panel then
-    drawEndlessPanel()
-  end
-
-  -- 帧尾边沿清理由 App.draw 统一执行（道具层共享同一帧）
+  W.endFrame()
 end
 
 function Hud.beginFrame(App)
   W.beginFrame(W.mouse.x, W.mouse.y, W.mouse.down, W.mouse.pressed, W.mouse.released, W.mouse.wheel)
 end
 
--- ==================== 输入 ====================
+-- ==================== 对外接口 ====================
 
 function Hud.pressAZ5(App)
-  local S = Engine.S
   if not azCoverOpen then
+    azCoverShake = 0.35
     App.logEvent('warn', 'АЗ-5 заблокирован колпаком — 请先点击玻璃罩打开')
     return
   end
@@ -889,29 +1214,74 @@ function Hud.pressAZ5(App)
   end
 end
 
+function Hud.storyAct(v)
+  story.act = v
+  local meta = {
+    ['1'] = { ru = 'АКТ I', cn = '第一幕' }, ['2'] = { ru = 'АКТ II', cn = '第二幕' },
+    ['2B'] = { ru = 'АКТ II-Б', cn = '第二幕B' }, ['3'] = { ru = 'АКТ III', cn = '第三幕' },
+    ['3B'] = { ru = 'АКТ III-Б', cn = '第三幕B' }, ['4'] = { ru = 'АКТ IV', cn = '第四幕' },
+    ['5'] = { ru = 'АКТ V', cn = '第五幕' }, ['6'] = { ru = 'АКТ VI', cn = '第六幕' },
+  }
+  local m = meta[tostring(v)] or { ru = 'АКТ', cn = '第·幕' }
+  story.actRu, story.actCn = m.ru, m.cn
+end
+
+function Hud.storyObjective(text)
+  story.obj = text or ''
+  story.objDone = false
+end
+
+function Hud.initStoryHud()
+  endlessHudVisible = false
+  if AppRef and AppRef.scenario then Hud.storyAct(AppRef.scenario.flags.act or 1) end
+end
+
+function Hud.clearStoryHud()
+  story = { act = nil, actRu = '', actCn = '', obj = '', objDone = false }
+  endlessHudVisible = false
+  logZoomOpen = false
+end
+
+function Hud.showEndlessHud() endlessHudVisible = true end
+function Hud.hideEndlessHud() endlessHudVisible = false end
+
+function Hud.setPanelCallbacks(onOpen, onClose, onBankrupt)
+  panelOpenCb, panelCloseCb, bankruptCb = onOpen, onClose, onBankrupt
+end
+
+function Hud.showEndlessSettle(d)
+  panel = { kind = 'settle', data = d }
+  if panelOpenCb then panelOpenCb() end
+end
+
+function Hud.showEndlessEvent(evt, router)
+  panel = { kind = 'event', data = evt, router = router }
+  if panelOpenCb then panelOpenCb() end
+end
+
+function Hud.closeEndlessPanel()
+  panel = nil
+  if panelCloseCb then panelCloseCb() end
+end
+
+function Hud.endlessPanelOpen() return panel ~= nil end
+
 function Hud.mousepressed(App, x, y, button)
   if button ~= 1 then return end
   W.mouse.pressed = true
   W.mouse.down = true
   W.mouse.x, W.mouse.y = x, y
-  -- 电话浮层点击关闭
   if App.floatShowing then
-    local w, h = 560, 120
-    local fx, fy = 800 - w / 2, 900 - h - 110
-    if x >= fx and x <= fx + w and y >= fy and y <= fy + h then
-      App.hideFloat()
-    end
+    local w, h = 560, 110
+    local fx, fy = 800 - w / 2, 900 - h - 130
+    if x >= fx and x <= fx + w and y >= fy and y <= fy + h then App.hideFloat() end
   end
 end
 
 function Hud.mousereleased(App, x, y, button)
   W.mouse.down = false
   W.mouse.released = true
-  if rodHold ~= 0 then
-    Engine.endRodMove()
-    rodHold = 0
-  end
-  drag = nil
+  if rodHold ~= 0 then Engine.endRodMove(); rodHold = 0 end
 end
 
 function Hud.mousemoved(App, x, y)
@@ -920,16 +1290,18 @@ end
 
 function Hud.wheelmoved(dy)
   W.mouse.wheel = dy
-  logScroll = logScroll + dy * 24
-  if logScroll < 0 then logScroll = 0 end
+  if logZoomOpen then
+    logScroll = logScroll + dy * 24
+    if logScroll < 0 then logScroll = 0 end
+  end
 end
 
 function Hud.reset()
-  drag = nil
   rodHold = 0
   azCoverOpen = false
+  azCoverShake = 0
   logScroll = 0
-  quadModeSplit = false
+  logZoomOpen = false
   panel = nil
   story = { act = nil, actRu = '', actCn = '', obj = '', objDone = false }
   endlessHudVisible = false
