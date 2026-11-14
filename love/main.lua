@@ -3,6 +3,7 @@
 
 local Layout = require('src.ui.layout')
 local App = require('src.app')
+local Hud = require('src.ui.hud')
 
 local headlessTest = false
 local smokeFrames = nil
@@ -52,6 +53,14 @@ function love.update(dt)
       love.graphics.captureScreenshot('smoke_free.png', true)
       smokeStep = 4
     elseif S1 == 4 then
+      -- 道具打开/关闭链路（sfx 走 Source 播放路径）
+      local Props = require('src.props')
+      Props.openProp('coffee')
+      Props.closeProp()
+      Props.openProp('phone')
+      Props.closeProp()
+      Props.openProp('manual')
+      Props.closeProp()
       App.endGame('VOLUNTARY', {})
       smokeStep = 5
     elseif S1 == 5 and App.state == 'DEBRIEF' then
@@ -69,8 +78,11 @@ function love.update(dt)
       print('SMOKE OK')
       love.event.quit(0)
     end
-    if f > 900 then
-      print('SMOKE TIMEOUT step=' .. tostring(smokeStep) .. ' state=' .. App.state)
+    if f > 1500 then
+      print('SMOKE TIMEOUT step=' .. tostring(smokeStep) .. ' state=' .. App.state
+        .. ' paused=' .. tostring(App.paused) .. ' ignition=' .. tostring(App.ignitionFx ~= nil)
+        .. ' igT=' .. (App.ignitionFx and string.format('%.2f', App.ignitionFx.t) or '-')
+        .. ' endFx=' .. tostring(App.endingFx ~= nil) .. ' endlessPanel=' .. tostring(Hud.endlessPanelOpen()))
       love.event.quit(1)
     end
   end
