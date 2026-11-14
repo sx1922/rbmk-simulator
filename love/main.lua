@@ -5,9 +5,10 @@ local Layout = require('src.ui.layout')
 local App = require('src.app')
 
 local headlessTest = false
+local smokeFrames = nil
 
 function love.load()
-  -- headless 测试钩子: love . test
+  -- headless 测试钩子: love <dir> test
   if arg and arg[2] == 'test' then
     headlessTest = true
     local ok, run = pcall(require, 'tests.run2')
@@ -16,6 +17,10 @@ function love.load()
       love.event.quit(passed and 0 or 1)
       return
     end
+  end
+  -- 渲染冒烟自检: love <dir> smoke（自动遍历主要绘制路径，崩溃即退出非 0）
+  if arg and arg[2] == 'smoke' then
+    smokeFrames = 0
   end
   Layout.calc(love.graphics.getWidth(), love.graphics.getHeight())
   App.boot()
@@ -26,6 +31,26 @@ function love.update(dt)
   if dt > 0.5 then dt = 0.5 end
   App.lastDt = dt
   App.update(dt)
+  -- 冒烟自检帧驱动：menu → 值班 → 终局 → 结算 → 回菜单 → 无尽
+  if smokeFrames then
+    smokeFrames = smokeFrames + 1
+    local f = smokeFrames
+    if f == 10 then
+      App.startGame('free')
+    elseif f == 90 then
+      App.endGame('VOLUNTARY', {})
+    elseif f == 260 and App.state == 'DEBRIEF' then
+      require('src.debrief').confirm()
+    elseif f == 280 then
+      App.startGame('endless')
+    elseif f == 360 then
+      print('SMOKE OK')
+      love.event.quit(0)
+    elseif f > 500 then
+      print('SMOKE TIMEOUT state=' .. App.state)
+      love.event.quit(1)
+    end
+  end
 end
 
 function love.draw()

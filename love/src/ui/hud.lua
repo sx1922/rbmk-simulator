@@ -63,7 +63,7 @@ local LAMP_COLORS = {
 
 -- ==================== 绘制原语 ====================
 
-local function panel(x, y, w, h, title)
+local function drawPanelBox(x, y, w, h, title)
   love.graphics.setColor(Theme.panel2)
   love.graphics.rectangle('fill', x, y, w, h, 6)
   love.graphics.setColor(Theme.edge)
@@ -231,7 +231,7 @@ end
 -- ==================== 区域绘制 ====================
 
 local function drawZone1(App)
-  panel(16, 56, 584, 592, 'РЕАКТОР · 反应堆控制')
+  drawPanelBox(16, 56, 584, 592, 'РЕАКТОР · 反应堆控制')
   local S = Engine.S
   local cx = 136
 
@@ -317,7 +317,7 @@ local function drawZone1(App)
 
   -- AZ-5 组件
   local azx, azy = 480, 380
-  panel(azx, azy, 108, 256, 'АЗ-5')
+  drawPanelBox(azx, azy, 108, 256, 'АЗ-5')
   -- 钥匙
   local keyOn = S.azBlocked
   love.graphics.setColor(Theme.panel4)
@@ -352,7 +352,7 @@ local function drawZone1(App)
 end
 
 local function drawZone2(App)
-  panel(616, 56, 384, 592, 'ТУРБИНА / ПИТАНИЕ · 汽机与给水')
+  drawPanelBox(616, 56, 384, 592, 'ТУРБИНА / ПИТАНИЕ · 汽机与给水')
   local S = Engine.S
 
   -- 分离器液位
@@ -411,7 +411,7 @@ local function drawZone2(App)
 end
 
 local function drawZone3(App)
-  panel(1016, 56, 190, 592, 'ДОЗА /辅助')
+  drawPanelBox(1016, 56, 190, 592, 'ДОЗА /辅助')
   local S = Engine.S
 
   local dispDose = Instrument.update('dose', S.containment_dose_rate, App.lastDt or 0.016)
@@ -464,7 +464,7 @@ local function drawZone3(App)
 end
 
 local function drawZone4(App)
-  panel(1222, 56, 362, 592, 'СИГНАЛИЗАЦИЯ · 报警与记录')
+  drawPanelBox(1222, 56, 362, 592, 'СИГНАЛИЗАЦИЯ · 报警与记录')
   local S = Engine.S
 
   -- 报警灯阵
